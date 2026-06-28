@@ -10,7 +10,7 @@ Computational pipeline connecting the Radhakrishnan lab's **Wasserstein mechanot
 
 ## Table of contents
 
-1. [Why this matters](#why-this-matters)
+1. [Background](#background)
 2. [Pipeline overview](#pipeline-overview)
 3. [Data & cohort](#data--cohort)
 4. [Phase A — Mechanotypes (snRNA-seq)](#phase-a--mechanotypes-snrna-seq)
@@ -25,13 +25,11 @@ Computational pipeline connecting the Radhakrishnan lab's **Wasserstein mechanot
 
 ---
 
-## Why this matters
+## Background
 
 Wilms tumor (nephroblastoma) is morphologically organized into **blastemal**, **epithelial**, and **stromal** compartments, with clinically dominant **favorable vs anaplastic** histology. Most single-cell analyses compare *means* or cluster proportions; this repo implements the lab's alternative: compare **entire distributions** of predefined 1-D program scores via **Wasserstein-1 distance** and **consensus clustering**, then ask which compartments **switch mechanotype** between histology groups.
 
-Separately, spatial ABM models often assume uniform or deconvolution-only initial conditions. Phase B extracts **observed** compartment fractions from paired H&E at nucleus resolution and validates them against the same gene programs measured in Visium spots — bridging morphology and transcriptomics on the same tumors.
-
-**Novelty:** To our knowledge, this is the first application of distributional Wilms mechanotyping on ScPCA snRNA data combined with weakly supervised H&E classification validated against spot-level programs.
+Separately, spatial ABM models often assume uniform or deconvolution-only initial conditions. Phase B extracts compartment fractions from paired H&E at nucleus resolution and compares them to the same gene programs measured in Visium spots.
 
 ---
 
@@ -97,7 +95,7 @@ Raw data are **never committed**; provenance logged in `data/raw/scpca_access_lo
 
 ## Phase A — Mechanotypes (snRNA-seq)
 
-### Methodology (research-grade)
+### Methodology
 
 | Step | Script | Method |
 |------|--------|--------|
@@ -166,7 +164,7 @@ Config: `config/phase_b.yaml` (default: 6 libraries, 80 spots/library = 480 tile
 | Stromal fraction Pearson *r* | 0.27 |
 | Blastemal fraction Pearson *r* | 0.23 |
 
-**Interpretation:** Nucleus-level classification under weak spot labels is intentionally hard (each Visium spot ≈ 10–20 cells). **Spot-level transcriptomic validation** — especially epithelial *r* ≈ 0.45 and 72% dominant-state agreement — supports that morphology captures compartment composition, not perfect per-nucleus labels.
+**Notes:** Nucleus-level accuracy is low under weak spot labels (each Visium spot ≈ 10–20 cells). Spot-level metrics (dominant-state agreement, fraction correlations) are reported separately.
 
 ---
 
@@ -272,7 +270,7 @@ sc-wilms-data/
 ├── results/
 │   ├── mechanotypes/        # consensus RDS, switches CSV, methods YAML
 │   ├── classifier/        # model, metrics, deconv JSON
-│   ├── figures/             # publication-style PNGs
+│   ├── figures/             # analysis figures (PNG)
 │   └── abm/                 # PhysiCell stub outputs
 ├── tests/
 ├── PRD.md                   # requirements & acceptance criteria
