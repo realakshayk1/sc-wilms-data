@@ -1,0 +1,41 @@
+# raw / patient data — never commit
+data/raw/
+data/processed/
+results/*
+!results/.gitkeep
+!results/figures/
+!results/figures/**
+
+# secrets
+.env
+*.token
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+Rplots.pdf
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# large model weights
+*.h5
+*.pt
+*.onnx
+
+# notebooks checkpoints
+.ipynb_checkpoints/

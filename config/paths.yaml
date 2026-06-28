@@ -1,0 +1,35 @@
+# Relative paths from repo root — no absolute paths.
+project_id: SCPCP000006
+
+dirs:
+  raw: data/raw
+  processed: data/processed
+  results: results
+  figures: results/figures
+
+phase_a:
+  merged_sce_rds: data/processed/merged_sce.rds
+  seurat_rds: data/processed/seurat_wilms.rds
+  scores_rds: data/processed/cell_feature_scores.rds
+  items_rds: data/processed/clustering_items.rds
+  wasserstein_dir: data/processed/wasserstein
+  consensus_dir: results/mechanotypes
+  switches_csv: results/mechanotypes/mechanotype_switches.csv
+
+phase_b:
+  spatial_root: data/raw/scpca_downloads/spaceranger/SCPCP000006_spatial
+  spot_signatures_parquet: data/processed/spot_signatures.parquet
+  tiles_dir: data/processed/he_tiles
+  nuclei_dir: data/processed/nuclei
+  features_parquet: data/processed/nucleus_features.parquet
+  classifier_pkl: results/classifier/rf_classifier.pkl
+  spot_fractions_csv: results/classifier/spot_fractions.csv
+  deconv_comparison_csv: results/classifier/deconv_correlation.csv
+  methods_json: results/classifier/phase_b_methods.json
+
+abm:
+  config: config/physicell.yaml
+  output_dir: results/abm
+
+provenance:
+  access_log: data/raw/scpca_access_log.txt

@@ -1,0 +1,50 @@
+# Fixed Phase A feature list — do not add/drop features to improve clusters.
+# Each feature is a 1-D score per cell; Wasserstein runs ONLY on these scalars.
+seed: 42
+min_cells_per_item: 25
+
+features:
+  - id: blastemal_program
+    description: Blastemal cell-state program score
+    genes_positive: [WT1, SIX2, SIX1, CITED1, DAPL1, NCAM1]
+    genes_negative: [EPCAM, KRT8, KRT18]
+
+  - id: epithelial_program
+    description: Epithelial / differentiation program
+    genes_positive: [EPCAM, KRT8, KRT18, CDH1, LCN2]
+    genes_negative: [VIM, COL1A1, SIX2]
+
+  - id: stromal_program
+    description: Stromal / mesenchymal program
+    genes_positive: [VIM, COL1A1, COL3A1, DCN, LUM, ACTA2]
+    genes_negative: [EPCAM, WT1]
+
+  - id: proliferation
+    description: Cell-cycle proliferation score
+    genes_positive: [MKI67, TOP2A, PCNA, CDK1, UBE2C]
+    genes_negative: []
+
+  - id: wt1_activity
+    description: WT1 transcription factor activity proxy
+    genes_positive: [WT1, PAX2, SIX2, GDNF]
+    genes_negative: []
+
+  - id: wnt_bcatenin
+    description: Wnt / beta-catenin target score
+    genes_positive: [LEF1, TCF7, AXIN2, MYC, CCND1]
+    genes_negative: [APC, AXIN1]
+
+cell_states:
+  - blastemal
+  - epithelial
+  - stromal
+
+histology_groups:
+  - favorable
+  - anaplastic
+
+consensus:
+  max_k: 6
+  reps: 1000
+  p_item: 0.8
+  boundary_threshold: 0.8

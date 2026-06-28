@@ -1,0 +1,40 @@
+name: sc-wilms-data
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - r-base=4.3
+  - r-yaml
+  - r-matrixstats
+  - r-ggplot2
+  - r-dplyr
+  - r-tidyr
+  - r-readr
+  - r-testthat
+  - r-remotes
+  - pip
+  - pip:
+      - scanpy>=1.10
+      - anndata>=0.10
+      - scikit-learn>=1.4
+      - scikit-image>=0.22
+      - scipy>=1.12
+      - numpy>=1.26
+      - pandas>=2.1
+pip install scanpy scikit-learn scikit-image opencv-python-headless pyarrow pyyaml matplotlib seaborn scipy stardist
+      - pyyaml>=6.0
+      - pytest>=8.0
+      - opencv-python-headless>=4.9
+      - stardist>=0.9
+      - csbdeep>=0.8
+      - cellpose>=3.0
+      - tifffile>=2024.2
+      - imageio>=2.34
+      - pyarrow>=15.0
+
+# R packages not on conda — install after env create:
+#   remotes::install_github("AlexsLemonade/ScPCAr")
+#   BiocManager::install(c("ConsensusClusterPlus", "waddR"))
+#   install.packages(c("transport", "maotai"))

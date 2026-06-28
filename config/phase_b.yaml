@@ -1,0 +1,25 @@
+# Phase B — histology ML on ScPCA Visium (SCPCP000006)
+spatial_root: data/raw/scpca_downloads/spaceranger/SCPCP000006_spatial
+
+# Tile extraction (hires-image pixels; Visium spot ~55 µm)
+tile_patch_radius_hires_px: 48
+min_umis_per_spot: 500
+max_spots_per_library: 80
+max_libraries: 6
+
+# Limit libraries for runtime; null = all Visium libraries on disk
+library_allowlist: null
+
+# Stain normalization: macenko fit on reference slide, applied to all tiles
+stain_normalization: macenko
+reference_library_id: SCPCL000438
+
+segmentation_method: watershed
+classifier: random_forest
+holdout_sample_fraction: 0.25
+
+# Weak supervision + deconvolution validation use the same Phase A programs
+signature_programs:
+  blastemal: blastemal_program
+  epithelial: epithelial_program
+  stromal: stromal_program

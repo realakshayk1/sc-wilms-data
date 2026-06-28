@@ -1,0 +1,38 @@
+# PhysiCell parameter mapping from H&E-derived spot fractions.
+# One representative tumor run — not a cohort sweep.
+seed: 42
+domain:
+  x_max_um: 500
+  y_max_um: 500
+  dx_um: 20
+  dy_um: 20
+
+cell_types:
+  blastemal:
+    proliferation_rate: 0.05
+    adhesion_strength: 0.3
+    apoptosis_rate: 0.001
+  epithelial:
+    proliferation_rate: 0.01
+    adhesion_strength: 0.8
+    apoptosis_rate: 0.002
+  stromal:
+    proliferation_rate: 0.005
+    adhesion_strength: 0.5
+    apoptosis_rate: 0.001
+    ecm_stiffness: 1.5
+
+fraction_to_parameter:
+  blastemal:
+    proliferation_scale: 1.5
+    adhesion_scale: 0.5
+  epithelial:
+    proliferation_scale: 0.8
+    adhesion_scale: 1.2
+  stromal:
+    ecm_stiffness_scale: 1.3
+
+simulation:
+  max_time_min: 1440
+  save_interval_min: 60
+  output_subdir: run_001
