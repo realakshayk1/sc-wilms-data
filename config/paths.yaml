@@ -15,6 +15,14 @@ phase_a:
   wasserstein_dir: data/processed/wasserstein
   consensus_dir: results/mechanotypes
   switches_csv: results/mechanotypes/mechanotype_switches.csv
+  distributional_csv: results/mechanotypes/distributional_validation.csv
+  loso_stability_csv: results/mechanotypes/loso_stability.csv
+  label_sensitivity_csv: results/mechanotypes/label_sensitivity.csv
+  pseudobulk_csv: results/mechanotypes/pseudobulk_validation.csv
+  bulk_validation_csv: results/mechanotypes/bulk_validation.csv
+  null_feature_csv: results/mechanotypes/null_feature_sensitivity.csv
+  bulk_quant_tsv: data/raw/scpca_downloads/single-cell-experiment/SCPCP000006_bulk_rna/SCPCP000006_bulk_quant.tsv
+  bulk_metadata_tsv: data/raw/scpca_downloads/single-cell-experiment/SCPCP000006_bulk_rna/SCPCP000006_bulk_metadata.tsv
 
 phase_b:
   spatial_root: data/raw/scpca_downloads/spaceranger/SCPCP000006_spatial
@@ -25,6 +33,11 @@ phase_b:
   classifier_pkl: results/classifier/rf_classifier.pkl
   spot_fractions_csv: results/classifier/spot_fractions.csv
   deconv_comparison_csv: results/classifier/deconv_correlation.csv
+  deconv_by_histology_json: results/classifier/deconv_correlation_by_histology.json
+  marker_deconv_json: results/classifier/marker_deconv_correlation.json
+  loto_json: results/classifier/loto_validation.json
+  negative_controls_json: results/classifier/negative_controls.json
+  snrna_concordance_csv: results/classifier/snrna_spatial_concordance.csv
   methods_json: results/classifier/phase_b_methods.json
 
 abm:

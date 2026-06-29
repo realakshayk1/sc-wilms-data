@@ -1,0 +1,47 @@
+# Fetal-kidney developmental signatures for WT tumor-cell typing (A1).
+# Rationale: canonical triphasic IHC markers are intermixed in snRNA-seq; fetal
+# nephrogenesis signatures separate tumor cells better (Young et al. 2018 Science;
+# Yang et al. 2025 Front Immunol, SCPCP000006). Each cell is scored for the five
+# signatures, assigned to the argmax subgroup, then collapsed to the triphasic axis.
+#
+# Marker sets are curated from fetal kidney / WT literature (canonical, not the exact
+# Supp. Table S1 download); report robustness vs the Option-C panels.
+
+method: fetal_signature        # fetal_signature | marker_assignment
+
+# Neural-like is rare in WT (Yang et al.) and its long marker genes (DST/NRXN1)
+# accumulate intronic reads in snRNA, causing massive over-calling under per-cell
+# argmax. It is therefore EXCLUDED from the competing signatures below.
+fetal_signatures:
+  # Cap mesenchyme / nephron progenitor (blastemal-like)
+  CM:  [SIX1, SIX2, CITED1, EYA1, SALL1, MEOX1, GDNF, DAPL1, CRABP2, WT1]
+  # Ureteric bud / collecting duct epithelium (mature epithelial)
+  UB:  [RET, GATA3, CALB1, WNT11, WNT9B, AQP2, KRT8, KRT18, EMX2, CDH1]
+  # Primitive vesicle / early nephron epithelium (epithelial)
+  PV:  [LHX1, PAX8, JAG1, DLL1, HNF1B, CDH6, MME, NPHS1, PTPRO, BMP7]
+  # Fibroblast-like (stromal)
+  fibroblast: [COL1A1, COL1A2, COL3A1, DCN, LUM, PDGFRA, PDGFRB, ACTA2, TAGLN]
+
+# Minimum z-score margin (top - runner-up) to make a confident call; else NA.
+assign_min_margin: 0.10
+
+# Within CM, split blastemal vs epithelial by these competing panels
+cm_split:
+  blastemal:  [EYA1, PAX2, SIX2, CITED1, MEOX1]
+  epithelial: [EPCAM, KRT18, KRT8, CDH1]
+
+# subgroup -> triphasic compartment
+subgroup_to_compartment:
+  CM_blastemal: blastemal
+  CM_epithelial: epithelial
+  UB: epithelial
+  PV: epithelial
+  fibroblast: stromal
+  neural: NA          # excluded
+
+# Tumor gating (same as Option C)
+nontumor_consensus_terms:
+  [macrophage, monocyte, dendritic, leukocyte, myeloid, "t cell", "b cell",
+   "natural killer", plasma, mast, granulocyte, neutrophil, megakaryocyte,
+   erythrocyte, endothelial, pericyte, "red pulp"]
+exclude_infercnv_reference: true

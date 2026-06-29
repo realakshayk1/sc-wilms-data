@@ -269,6 +269,41 @@ def select_tissue_spots(
     return tissue
 
 
+def marker_fractions(adata: Any, marker_map: dict[str, list[str]]) -> pd.DataFrame:
+    """Independent marker-gene softmax fractions (not Phase A program scores)."""
+    lookup = build_gene_lookup(adata.var_names.to_numpy(), adata.var)
+    X = adata.X
+    if sparse.issparse(X):
+        lib = np.asarray(X.sum(axis=1)).ravel().astype(float)
+    else:
+        lib = X.sum(axis=1).astype(float)
+    lib[lib == 0] = 1.0
+    med = float(np.median(lib))
+    var_names = adata.var_names.to_numpy()
+    var_index = {g: i for i, g in enumerate(var_names)}
+
+    scores = {}
+    for state, genes in marker_map.items():
+        hits = resolve_genes(genes, lookup, var_names)
+        idx = [var_index[g] for g in hits if g in var_index]
+        if not idx:
+            scores[state] = np.zeros(adata.n_obs)
+            continue
+        if sparse.issparse(X):
+            raw = np.asarray(X[:, idx].sum(axis=1)).ravel() / lib * med
+        else:
+            raw = X[:, idx].sum(axis=1) / lib * med
+        scores[state] = np.log1p(raw)
+
+    mat = np.column_stack([scores[s] for s in CELL_STATES if s in scores])
+    mat = mat - mat.max(axis=1, keepdims=True)
+    exp = np.exp(mat)
+    frac = exp / exp.sum(axis=1, keepdims=True)
+    out = pd.DataFrame(frac, index=adata.obs_names, columns=[f"marker_{s}" for s in CELL_STATES])
+    out["marker_dominant"] = [CELL_STATES[i] for i in np.argmax(frac, axis=1)]
+    return out
+
+
 def spot_id_for(library_id: str, barcode: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9]+", "_", barcode)
     return f"{library_id}__{safe}"
