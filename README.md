@@ -16,12 +16,13 @@ Computational pipeline connecting the Radhakrishnan lab's **Wasserstein mechanot
 4. [Phase A — Mechanotypes (snRNA-seq)](#phase-a--mechanotypes-snrna-seq)
 5. [Phase B — Histology ML (Visium H&E)](#phase-b--histology-ml-visium-he)
 6. [Results summary](#results-summary)
-7. [Figure gallery](#figure-gallery)
-8. [Quick start](#quick-start)
-9. [Repository layout](#repository-layout)
-10. [Configuration](#configuration)
-11. [Limitations & next steps](#limitations--next-steps)
-12. [References & citation](#references--citation)
+7. [ABM initial conditions](#abm-initial-conditions-physicell)
+8. [Figure gallery](#figure-gallery)
+9. [Quick start](#quick-start)
+10. [Repository layout](#repository-layout)
+11. [Configuration](#configuration)
+12. [Limitations & next steps](#limitations--next-steps)
+13. [References & citation](#references--citation)
 
 ---
 
