@@ -2,6 +2,68 @@
 
 Accumulated lessons for this repo. Newest first.
 
+### [better-approach] StarDist fixes the watershed morphology failure; ensemble adds nothing — 2026-06-29
+- What happened: watershed nuclear-morphology -> histology AUC was 0.39 (worse than chance).
+  StarDist '2D_versatile_he' at prob_thresh=0.4 (default 0.69 detects ~0 nuclei on 96px hires
+  tiles) gives morphology AUC 0.687 (perm p=0.021) — segmentation, not the hypothesis, was the
+  bottleneck. BUT ensemble (morphology + phikon-v2 embedding) = 0.719 vs embedding-only 0.714,
+  paired DeLong p=0.57: no orthogonal gain — both read the same nuclear atypia, same ~0.73 ceiling.
+- Rule: for H&E nuclear morphology on these tiles use StarDist with prob_thresh~0.4 + median
+  imputation (few-nuclei tumors -> NaN feats). Don't expect morphology+embedding ensembling to
+  beat embedding alone here. Median nuclei/tumor stays low (~14) — Visium-hires resolution limit.
+- See also: 16_stardist_morphology.py; results/classifier/stardist_morphology.json.
+
+### [gotcha] StarDist from_pretrained needs a Windows symlink (admin) — use a junction — 2026-06-29
+- What happened: `StarDist2D.from_pretrained("2D_versatile_he")` downloaded fine but crashed at
+  `OSError [WinError 1314] A required privilege is not held` — csbdeep publishes the extracted
+  model via `os.symlink`, which needs admin/Developer Mode on Windows.
+- Rule: create a directory JUNCTION (no admin needed) once, then from_pretrained skips the
+  symlink: `New-Item -ItemType Junction -Path <...>\StarDist2D\2D_versatile_he\2D_versatile_he
+  -Target <...>\2D_versatile_he_extracted`. Persists across runs. (TF backend itself is fine.)
+
+### [knowledge-gap] Phase B histology AUC is at a ~0.73 RESOLUTION ceiling — 2026-06-29
+- What happened: scaling Phikon spots 60->200, upgrading v1(ViT-B,768) -> v2(ViT-L,1024), and
+  swapping mean-pool -> gated attention-MIL moved tumor-level histology AUC only 0.724 -> 0.748.
+  Paired DeLong MIL vs mean-pool: delta +0.014, p=0.83 (indistinguishable). Both still beat
+  chance (perm p~0.003-0.006), so the signal is real but capped.
+- Rule: ~0.73-0.75 looks like a genuine ceiling from Visium-HIRES tiles (not true WSI). Don't
+  burn more effort on encoder/pooling tweaks for Phase B histology; the lever to lift it is
+  higher-resolution input (gated FMs on real WSI, or XMAG on 5x), which needs external data.
+  Report scale/MIL as a clean null-improvement, not a win.
+- See also: 15_phase_b_mil.py; results/classifier/phase_b_mil_phikon-v2.json.
+
+### [gotcha] Background jobs die on Claude session teardown; checkpoint long jobs — 2026-06-29
+- What happened: the phikon-v2 embedding (8002 ViT-L tiles, ~40min CPU) was killed ~5x by
+  process teardowns; the original all-or-nothing cache lost everything each time.
+- Rule: any multi-10-min background compute in this repo must checkpoint incrementally.
+  Pattern that worked: embed in batches, write APPEND-ONLY chunk parquets to a *_partial/ dir
+  every ~8 batches (atomic tmp+rename), resume by unioning chunk spot_ids and skipping done.
+  O(chunk) I/O, not O(all-so-far). On completion concat -> final cache, delete chunks.
+
+### [gotcha] ScPCA vital_status is "Expired"/"Alive", and small-n logistic separates — 2026-06-29
+- What happened: a regex `grepl("decea|dead")` reported 0 OS events because ScPCA encodes
+  death as **"Expired"** (8 of 43 samples). Also, covariate-adjusted ordinary logistic for
+  relapse (~10 events / 4 params) hit complete separation — ORs collapsed to exactly 1.0
+  with Wald p=1, or exploded to CI [2e-321, 5e27]. Neither is real signal.
+- Rule: map vital_status with `grepl("decea|dead|expir")`. For any small-n / rare-event
+  logistic in this repo use **Firth penalized regression** (`logistf`, installed) — it gives
+  finite ORs + profile-likelihood CIs under separation. Report univariate AND adjusted; at
+  EPV~2.5 the adjusted CI is wide by design (say so, don't dress it up).
+- Net Phase A prognostic (16_prognostic_association.R): proliferation_score -> relapse is a
+  NOMINAL positive (Firth univariate OR~4/SD p=0.013; Fisher OR 7.6 p=0.017) that triangulates
+  the GSEA/DE relapse proliferation signal, but does not survive BH-FDR or covariate adjustment.
+- See also: 15_hallmark_gsea.R (E2F/G2M/MYC up in relapse, padj~1e-29); 14_moderated_de.R.
+
+### [gotcha] R is installed but NOT on PATH — `which Rscript` lies — 2026-06-29
+- What happened: an agent ran `which Rscript` / `ls "/c/Program Files/R"`, got nothing, and
+  wrongly concluded "R is not installed → Phase A / edgeR blocked." R 4.6.1 is at
+  `C:\Program Files (x86)\R\R-4.6.1\bin\x64\Rscript.exe` (note the **(x86)** dir) and produced
+  every committed Phase A result this session.
+- Rule: never decide R is absent from PATH alone. Call it by full path or via
+  `scripts/rscript.bat` (which already encodes the fallback). From bash:
+  `RSCRIPT="/c/Program Files (x86)/R/R-4.6.1/bin/x64/Rscript.exe"`. BiocManager is present;
+  limma/edgeR install via `BiocManager::install(..., update=FALSE, ask=FALSE)`.
+
 ### [better-approach] Negatives were the wrong instrument — match analysis to biology — 2026-06-29
 - What happened: within-compartment distributional tests (Phase A) and cross-modal composition
   regression (Phase B) were both null. Reframing to the analyses the biology actually supports
