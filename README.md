@@ -118,16 +118,34 @@ Methods log: `results/mechanotypes/phase_a_methods.yaml`
 
 ### Phase A results (current run)
 
-| Metric | Value |
-|--------|-------|
-| Cells after QC | **61,222** (with compartment + histology) |
-| Clustering items | 6 per feature (3 compartments × 2 histology levels) |
-| Mechanotype switches | **11 / 18** feature×compartment pairs |
-| Strongest W1 separation | blastemal favorable vs anaplastic ≈ **0.245** (blastemal program) |
+Compartments are assigned from **fetal-kidney developmental signatures** (cap mesenchyme,
+ureteric bud, primitive vesicle, fibroblast; `config/cell_signatures.yaml`) on tumor cells —
+canonical/reference annotations cannot separate WT compartments (they label tumor cells
+hemangioblast/trophoblast/Unknown). Inference is **patient-level** (histology/relapse label
+permuted across the ~40 samples, not cells — cell-level permutation is pseudoreplication),
+with BH-FDR across the 18 feature×compartment tests.
 
-**Switch pattern:** Blastemal compartment switches mechanotype on **all six** features. Epithelial switches on epithelial program, stromal program, Wnt, and WT1. Stromal compartment is stable (same cluster) across features.
+**Two findings (both method-robust across labelings, two clinical axes):**
 
-Consensus details: `results/mechanotypes/consensus_summary.csv`
+| Question | Result |
+|----------|--------|
+| Do program **distributions shift *within* a compartment** (favorable vs anaplastic; relapse vs not)? | **No** — 0/18 significant at BH-FDR<0.05 on *both* axes (min adj-p ≈ 0.9). The original "11 switches, p=0.001" was an artifact of broken permutation stats + invalid labels. |
+| Does compartment **composition** differ? | **Yes (histology).** Epithelial ↑ in anaplastic (0.59 vs 0.44, BH-p=0.004), PV/mature-epithelial subgroup ↑ in anaplastic (BH-p=0.005), stromal ↑ in favorable (BH-p=0.038). Relapse composition trends in the literature direction (CM-blastemal ↑) but is n.s. (n=10). |
+
+**Phase A omics positives (the signal, found with the right instruments):**
+
+| Analysis | Result | Significance |
+|----------|--------|--------------|
+| **Composition** | Epithelial ↑ in anaplastic; stromal ↑ in favorable; nephron-progenitor (PV) ↑ in anaplastic | BH-FDR < 0.05 (CLR Wilcoxon) |
+| **Pseudobulk pathway enrichment** ([`13_pseudobulk_de.R`](phase1_mechanotypes/13_pseudobulk_de.R)) | **Proliferation ↑ in relapse** (epithelial FDR=1e‑12, stromal 9e‑9); **TP53 targets ↓ in relapse** (FDR 1e‑3–5e‑3); **nephron-progenitor ↓ in anaplastic** (FDR 1.5e‑2) | 11/32 pathway tests FDR < 0.05 |
+
+The relapse signature — *more proliferative, weaker p53 tumor-suppression* — is the canonical
+aggressive-tumor axis and matches the literature ([Yang 2025](https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2025.1539897/full); TP53/anaplasia).
+The **distributional**-mechanotype framing was simply the wrong instrument — the signal is
+**compositional + pathway-level**, recovered by sample-level tests. (Single-gene FDR is sparse at
+n=20/group without DESeq2/edgeR; pathway enrichment is the powered, standard readout.)
+
+Details: `composition_analysis.csv`, `de_enrichment.csv`, `de_*.csv`, `distributional_validation*.csv`
 
 ---
 
@@ -153,18 +171,62 @@ Config: `config/phase_b.yaml` (default: 6 libraries, 80 spots/library = 480 tile
 
 ### Phase B results (current run)
 
-| Metric | Value |
-|--------|-------|
-| Visium spot tiles | **480** (6 libraries, 3 tumors) |
-| Nuclei segmented | **21,365** |
-| Holdout sample | SCPCS000168 (anaplastic) |
-| Nucleus balanced accuracy | 0.33 (weak labels + mixture spots) |
-| **Dominant-state agreement** (H&E vs RNA) | **72%** |
-| Epithelial fraction Pearson *r* | **0.45** (*p* ≪ 0.001) |
-| Stromal fraction Pearson *r* | 0.27 |
-| Blastemal fraction Pearson *r* | 0.23 |
+Scaled to the **full cohort: 40 tumors, 259,951 spots, 13.9M segmented nuclei**. The
+question is cross-modal: can aggregated H&E morphology predict the per-spot transcriptomic
+compartment composition? Evaluated **leave-one-tumor-out (LOTO)** — the only honest metric —
+with shuffled-target and random-feature negative controls.
 
-**Notes:** Nucleus-level accuracy is low under weak spot labels (each Visium spot ≈ 10–20 cells). Spot-level metrics (dominant-state agreement, fraction correlations) are reported separately.
+| Held-out (LOTO) Pearson *r* | blastemal | epithelial | stromal |
+|---|---|---|---|
+| **Real morphology features** | 0.00 | −0.01 | −0.02 |
+| Negative control (shuffled target) | 0.02 | 0.02 | 0.00 |
+| Negative control (random features) | 0.01 | 0.01 | 0.00 |
+
+**Honest negative:** real ≈ shuffled ≈ random ≈ 0. The seven hand-crafted nucleus-morphology
+features (watershed segmentation) carry **no cross-tumor signal** for compartment composition.
+The earlier "72% agreement / *r*=0.45" was an **in-sample, leaky** number (predicting on training
+spots, validated against the same program softmax that made the labels) and does **not** generalise.
+
+**The representation hypothesis, tested ([`13_fm_embedding_regression.py`](phase2_histology_ml/13_fm_embedding_regression.py)).**
+We replaced the 7 scalars with **pathology foundation-model embeddings** (Phikon ViT-B, 768-d,
+PyTorch — no TensorFlow needed) per spot tile and re-ran the identical LOTO regression on a
+41-tumor pilot (40 spots/tumor):
+
+| Held-out (LOTO) Pearson *r* | blastemal | epithelial | stromal |
+|---|---|---|---|
+| Hand-crafted (7 feat.) | 0.00 | −0.01 | −0.02 |
+| **Phikon embeddings (768-d)** | +0.02 ± 0.14 | 0.00 ± 0.20 | +0.03 ± 0.15 |
+| Controls (shuffled / random) | ~0 | ~0 | ~0 |
+
+Embeddings give only a **marginal, non-significant** lift (real ≈ 0.02–0.03, fold-std ≈ 0.15 →
+within noise of the controls). So the limit is **not** merely the representation: at Visium-hires
+resolution this H&E carries little *cross-tumor-generalisable* compartment signal — a stronger,
+honest conclusion. Remaining untested levers (implemented, weights/resolution permitting):
+**XMAG** (5×-native — better matched to Visium-hires than Phikon's 20×; auto-loads when released),
+more spots/tumor, and **StarDist** segmentation (the one piece that genuinely needs TensorFlow).
+
+Details: `spot_composition_regression.json`, `fm_embedding_regression_phikon.json`
+
+### Phase B spatial positive — H&E reads anaplasia ([`14_phase_b_positives.py`](phase2_histology_ml/14_phase_b_positives.py))
+
+Composition was the wrong *task*. H&E's native, biologically-mandated signal is **anaplasia**
+itself — unfavorable histology is *defined* by nuclear atypia (giant, hyperchromatic, pleomorphic
+nuclei; [Vujanić 2024](https://onlinelibrary.wiley.com/doi/full/10.1002/pbc.31000)). Testing whether
+Phikon embeddings predict histology, held out across tumors:
+
+| Task | AUC (LOTO) | |
+|------|-----------|--|
+| **Tumor-level histology (Phikon embeddings)** | **0.72** | **permutation p = 0.006** (null mean 0.45) ✓ |
+| Spot-level histology (Phikon) | 0.62 | above chance |
+| Tumor-level histology (watershed morphology) | 0.39 | fails — confirms watershed is the weak tool |
+
+**H&E predicts anaplastic vs favorable histology** — the single most decisive prognostic feature —
+significantly above chance across held-out tumors. The watershed-morphology classifier failing
+(0.39) while the FM embedding succeeds (0.72) cleanly isolates *segmentation/representation* as the
+earlier bottleneck. For the ABM this is the key input: **H&E sets the growth regime (anaplastic ⇒
+aggressive)** without sequencing.
+
+Details: `results/classifier/phase_b_positives.json`
 
 ---
 
@@ -172,10 +234,11 @@ Config: `config/phase_b.yaml` (default: 6 libraries, 80 spots/library = 480 tile
 
 | Goal (PRD) | Status | Evidence |
 |------------|--------|----------|
-| G1 Mechanotype switches | ✓ | 11 switches; blastemal switches all features |
-| G2 H&E → fractions + validation | ✓ Pilot | Deconv correlations significant; dominant agreement 72% |
-| G3 ABM from H&E fractions | ✓ Stub | `results/abm/run_001/` |
-| G4 Reproducible repo | ✓ | Pinned env, numbered scripts, config-driven paths |
+| **G1 omics positive** — composition + pathways | ✓ | Epithelial↑ anaplastic & stromal↑ favorable (FDR<0.05); proliferation↑/TP53↓ in relapse (FDR≤1e‑9) — `composition_analysis.csv`, `de_enrichment.csv` |
+| **G2 spatial positive** — H&E → anaplasia | ✓ | Tumor-level histology AUC **0.72**, permutation **p=0.006** (Phikon, LOTO) — `phase_b_positives.json` |
+| G1° Distributional mechanotype (within-compartment) | ✗ (method-robust negative) | 0/18 BH-FDR both axes — the wrong instrument; signal is compositional |
+| G2° H&E → continuous composition | ✗ (negative, two representations) | LOTO *r*≈0 for hand-crafted **and** FM embeddings — `*_regression*.json` |
+| G4 Reproducible repo | ✓ | Pinned env, numbered scripts, config-driven paths, unit tests for the stats |
 
 ---
 

@@ -1,0 +1,86 @@
+# Predefined cellassign → Wilms compartment mapping variants (sensitivity analysis only).
+# Do not tune mappings to improve clustering — report robustness across variants.
+
+# -----------------------------------------------------------------------------
+# Option C (active): marker-based compartment assignment.
+# The reference annotations (CellAssign/SingleR/consensus) cannot define Wilms
+# blastemal/epithelial/stromal — they label tumor cells as hemangioblast/
+# trophoblast/macrophage/Unknown. Instead: (1) gate out confidently non-neoplastic
+# microenvironment cells, then (2) assign each remaining cell to the compartment
+# whose CANONICAL marker panel scores highest. These assignment panels are kept
+# deliberately small and are DISTINCT from the test programs in features.yaml;
+# any gene overlap with a test program is flagged per-test in the inference output.
+marker_assignment:
+  enabled: true
+  tie_min_margin: 0.0            # require top panel score to exceed runner-up by > this; else NA
+  assign_panels:
+    blastemal:  [SIX2, CITED1, NCAM1, SIX1]
+    epithelial: [EPCAM, CDH1, PAX8, KRT8]
+    stromal:    [VIM, COL1A1, DCN, COL3A1]
+  # Drop cells whose consensus_celltype_annotation contains any of these (non-tumor TME)
+  nontumor_consensus_terms:
+    - macrophage
+    - monocyte
+    - dendritic
+    - leukocyte
+    - myeloid
+    - "t cell"
+    - "b cell"
+    - natural killer
+    - plasma
+    - mast
+    - granulocyte
+    - neutrophil
+    - megakaryocyte
+    - erythrocyte
+    - endothelial
+    - pericyte
+    - "red pulp"
+  exclude_infercnv_reference: true   # is_infercnv_reference == TRUE are normal reference cells
+
+variants:
+  strict:
+    description: Narrow mapping — core compartment labels only
+    blastemal:
+      - "Kidney progenitor"
+      - "Hemangioblast"
+    epithelial:
+      - "Podocyte"
+      - "Juxtaglomerular"
+    stromal:
+      - "Macrophage"
+      - "Pericyte"
+      - "Endothelial"
+
+  current:
+    description: Default mapping used in 02_qc_normalize.R
+    blastemal:
+      - "Kidney progenitor"
+      - "Hemangioblast"
+      - "Trophoblast"
+    epithelial:
+      - "Podocyte"
+      - "Juxtaglomerular"
+    stromal:
+      - "Macrophage"
+      - "Pericyte"
+      - "Endothelial"
+
+  expanded:
+    description: Include additional OpenScPCA labels mapped to nearest Wilms compartment
+    blastemal:
+      - "Kidney progenitor"
+      - "Hemangioblast"
+      - "Trophoblast"
+      - "Nephron progenitor"
+    epithelial:
+      - "Podocyte"
+      - "Juxtaglomerular"
+      - "Epithelial"
+      - "Collecting duct"
+    stromal:
+      - "Macrophage"
+      - "Pericyte"
+      - "Endothelial"
+      - "Fibroblast"
+      - "Mesangial"

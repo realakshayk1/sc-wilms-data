@@ -8,8 +8,8 @@ import json
 import pickle
 
 import pandas as pd
-from scipy.stats import pearsonr, spearmanr
 
+from classifier_utils import evaluate_spot_fractions
 from utils import ensure_dir, load_config, resolve_path, set_seed_logged, setup_logging
 
 CELL_STATES = ["blastemal", "epithelial", "stromal"]
@@ -67,30 +67,24 @@ def main() -> None:
     ]
     merged = frac_df.merge(deconv, on="spot_id", how="inner")
 
-    correlations = {}
-    for state in CELL_STATES:
-        r, p = pearsonr(merged[f"frac_{state}"], merged[f"deconv_{state}"])
-        rho, _ = spearmanr(merged[f"frac_{state}"], merged[f"deconv_{state}"])
-        correlations[state] = {
-            "pearson_r": float(r),
-            "pearson_p": float(p),
-            "spearman_rho": float(rho),
-        }
-
-    # Dominant-state agreement between image classifier and transcriptome
-    merged["pred_dominant"] = merged[[f"frac_{s}" for s in CELL_STATES]].idxmax(axis=1)
-    merged["pred_dominant"] = merged["pred_dominant"].str.replace("frac_", "")
-    dom_agree = float((merged["pred_dominant"] == merged["dominant_state"]).mean())
+    eval_out = evaluate_spot_fractions(frac_df, deconv)
+    correlations = eval_out["correlations"]
+    dom_agree = eval_out["dominant_state_agreement"]
 
     out = {
         "correlations": correlations,
         "dominant_state_agreement": dom_agree,
-        "n_spots": int(len(merged)),
+        "n_spots": eval_out["n_spots"],
+        "by_histology": eval_out["by_histology"],
         "validation_method": "Softmax Phase A program scores per Visium spot (same genes as snRNA-seq)",
         "seed": seed,
     }
     with open(corr_csv, "w") as f:
         json.dump(out, f, indent=2)
+
+    by_hist_path = resolve_path(cfg, cfg["paths"]["phase_b"]["deconv_by_histology_json"])
+    with open(by_hist_path, "w") as f:
+        json.dump(eval_out["by_histology"], f, indent=2)
 
     print(f"[ok] Spot fractions -> {out_csv} ({len(frac_df)} spots)")
     print(f"[ok] Dominant-state agreement (H&E vs RNA): {dom_agree:.3f}")

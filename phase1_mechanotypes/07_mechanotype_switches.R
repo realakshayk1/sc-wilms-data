@@ -61,7 +61,8 @@ main <- function() {
     wasserstein = "1-D Wasserstein-1 per feature on cell score distributions only",
     clustering_items = sprintf("(cell_state x histology) groups with >= %d cells", cfg$features$min_cells_per_item),
     consensus = "ConsensusClusterPlus PAM; k selected by low PAC + high Calinski-Harabasz",
-    cell_state_labels = "OpenScPCA cellassign annotations mapped to blastemal/epithelial/stromal",
+    cell_state_labels = "Canonical marker-panel argmax on tumor cells (Option C; config/label_mapping.yaml marker_assignment); reference CellAssign/SingleR labels do NOT define Wilms compartments",
+    primary_inference = "Patient-level: histology label permuted across samples (not cells); BH-FDR across 18 feature x compartment tests; see 09_distributional_validation.R",
     histology = "Sample subdiagnosis (Favorable vs Anaplastic)",
     seed = cfg$features$seed
   )

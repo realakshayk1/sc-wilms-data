@@ -173,6 +173,48 @@ def plot_classifier_summary(metrics_path: Path, deconv_path: Path, fig_dir: Path
     print(f"[fig] {out}")
 
 
+def plot_loto_summary(loto_path: Path, fig_dir: Path) -> None:
+    if not loto_path.exists():
+        return
+    with open(loto_path) as f:
+        loto = json.load(f)
+    folds = loto.get("folds", [])
+    if not folds:
+        return
+    states = CELL_STATES
+    mean_r = loto.get("mean_pearson_r", {})
+    std_r = loto.get("std_pearson_r", {})
+    fig, ax = plt.subplots(figsize=(6, 4))
+    vals = [mean_r.get(s, 0) for s in states]
+    errs = [std_r.get(s, 0) for s in states]
+    ax.bar(states, vals, yerr=errs, color=[STATE_COLORS[s] for s in states], capsize=4, edgecolor="white")
+    ax.set_ylabel("Pearson r (mean ± SD across LOTO folds)")
+    ax.set_title(f"LOTO validation ({loto.get('n_folds', 0)} folds)")
+    ax.set_ylim(0, max(0.6, max(vals) * 1.3))
+    out = fig_dir / "phase_b_loto_validation.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[fig] {out}")
+
+
+def plot_negative_controls(neg_path: Path, fig_dir: Path) -> None:
+    if not neg_path.exists():
+        return
+    with open(neg_path) as f:
+        neg = json.load(f)
+    labels = ["real_labels_reference", "shuffled_labels", "random_features"]
+    epi_r = [neg.get(k, {}).get("correlations", {}).get("epithelial", {}).get("pearson_r", 0) for k in labels]
+    fig, ax = plt.subplots(figsize=(6, 3.8))
+    ax.bar(["Real", "Shuffled labels", "Random features"], epi_r, color=["#00A087", "#E64B35", "#B09C85"])
+    ax.set_ylabel("Epithelial fraction Pearson r")
+    ax.set_title("Negative controls vs real morphology model")
+    ax.set_ylim(0, max(0.5, max(epi_r) * 1.2))
+    out = fig_dir / "phase_b_negative_controls.png"
+    fig.savefig(out, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[fig] {out}")
+
+
 def main() -> None:
     setup_logging()
     cfg = load_config()
@@ -194,6 +236,8 @@ def main() -> None:
         resolve_path(cfg, cfg["paths"]["phase_b"]["deconv_comparison_csv"]),
         fig_dir,
     )
+    plot_loto_summary(resolve_path(cfg, cfg["paths"]["phase_b"]["loto_json"]), fig_dir)
+    plot_negative_controls(resolve_path(cfg, cfg["paths"]["phase_b"]["negative_controls_json"]), fig_dir)
     print(f"[ok] Phase B figures -> {fig_dir}")
 
 
