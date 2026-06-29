@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Figures for the rigor upside-lever results (branch rigor-audit-positives).
+"""Result figures for Phase A (GSEA + moderated DE), Phase B (histology AUC), and the ABM mapping.
 
-Reads the result artifacts produced by the new Phase A/B/ABM scripts and renders three
-PNGs into results/figures/:
-  phase_a_rigor_gsea.png  — Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts
-  phase_b_rigor_auc.png   — tumor-level histology AUC forest with DeLong 95% CIs
-  abm_rigor_params.png    — ABM proliferation multiplier by relapse (biology -> parameter)
+Reads the result artifacts and renders three PNGs into results/figures/:
+  phase_a_gsea_de.png  — Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts
+  phase_b_histology_auc.png   — tumor-level histology AUC forest with DeLong 95% CIs
+  abm_parameters.png    — ABM proliferation multiplier by relapse (biology -> parameter)
 All values are read from disk; nothing is hard-coded except reference baselines.
 """
 from __future__ import annotations
@@ -44,7 +43,7 @@ def fig_phase_a(cfg, figdir):
         ax1.text(nes + (0.06 if nes > 0 else -0.06), yi, f"q={padj:.0e}",
                  va="center", ha="left" if nes > 0 else "right", fontsize=7.2, color="#333")
     ax1.set_xlabel("Normalized enrichment score (NES)")
-    ax1.set_title("A1 · Hallmark GSEA, relapse vs no-relapse\n(↑ = up in relapse; q = BH-FDR)",
+    ax1.set_title("Hallmark GSEA · relapse vs no-relapse\n(↑ = up in relapse; q = BH-FDR)",
                   fontsize=10.5, loc="left")
     ax1.set_xlim(g["NES"].min() - 1.4, g["NES"].max() + 1.4)
 
@@ -57,10 +56,10 @@ def fig_phase_a(cfg, figdir):
     ax2.barh(y - h / 2, de["voom_fdr05"], h, color=C_DN, alpha=0.7, label="limma-voom")
     ax2.set_yticks(y); ax2.set_yticklabels(de["label"], fontsize=7.8)
     ax2.set_xlabel("genes at FDR < 0.05")
-    ax2.set_title("A4 · Moderated pseudobulk DE\n(Welch stopgap found ~0)", fontsize=10.5, loc="left")
+    ax2.set_title("Moderated pseudobulk DE\n(genes at FDR < 0.05)", fontsize=10.5, loc="left")
     ax2.legend(fontsize=8, loc="lower right", frameon=False)
     fig.tight_layout()
-    out = figdir / "phase_a_rigor_gsea.png"; fig.savefig(out); plt.close(fig)
+    out = figdir / "phase_a_gsea_de.png"; fig.savefig(out); plt.close(fig)
     return out
 
 
@@ -70,12 +69,12 @@ def fig_phase_b(cfg, figdir):
     m = mil["models"]; s = sd["models"]
     # (label, auc, lo, hi, color, is_ref)
     rows = [
-        ("Watershed morphology (old)", sd["baseline_watershed_morph_auc_ref"], None, None, C_REF, True),
-        ("StarDist morphology (B3)", s["stardist_morphology_rf"]["auc"], s["stardist_morphology_rf"]["ci_low"], s["stardist_morphology_rf"]["ci_high"], C_MORPH, False),
-        ("Phikon-v1 mean-pool, 60sp (base)", mil["baseline_v1_meanpool_auc_ref"], None, None, C_REF, True),
-        ("Phikon-v2 mean-pool, 200sp (B1)", m["meanpool_logistic"]["auc"], m["meanpool_logistic"]["ci_low"], m["meanpool_logistic"]["ci_high"], C_EMB, False),
-        ("Phikon-v2 attention-MIL (B1)", m["attention_mil"]["auc"], m["attention_mil"]["ci_low"], m["attention_mil"]["ci_high"], C_EMB, False),
-        ("Ensemble morph + embedding (B2)", s["ensemble_morph_plus_embedding"]["auc"], s["ensemble_morph_plus_embedding"]["ci_low"], s["ensemble_morph_plus_embedding"]["ci_high"], C_UP, False),
+        ("Watershed morphology", sd["baseline_watershed_morph_auc_ref"], None, None, C_REF, True),
+        ("StarDist morphology", s["stardist_morphology_rf"]["auc"], s["stardist_morphology_rf"]["ci_low"], s["stardist_morphology_rf"]["ci_high"], C_MORPH, False),
+        ("Phikon-v1 mean-pool, 60 spots", mil["baseline_v1_meanpool_auc_ref"], None, None, C_REF, True),
+        ("Phikon-v2 mean-pool, 200 spots", m["meanpool_logistic"]["auc"], m["meanpool_logistic"]["ci_low"], m["meanpool_logistic"]["ci_high"], C_EMB, False),
+        ("Phikon-v2 attention-MIL", m["attention_mil"]["auc"], m["attention_mil"]["ci_low"], m["attention_mil"]["ci_high"], C_EMB, False),
+        ("Ensemble: morphology + embedding", s["ensemble_morph_plus_embedding"]["auc"], s["ensemble_morph_plus_embedding"]["ci_low"], s["ensemble_morph_plus_embedding"]["ci_high"], C_UP, False),
     ]
     fig, ax = plt.subplots(figsize=(9, 4.6))
     y = np.arange(len(rows))[::-1]
@@ -86,14 +85,14 @@ def fig_phase_b(cfg, figdir):
                    edgecolor="white", linewidth=0.8)
         ax.text(auc, yi + 0.22, f"{auc:.3f}", ha="center", va="bottom", fontsize=8.5, color=col)
     ax.axvline(0.5, color="k", ls="--", lw=0.9, alpha=0.6)
-    ax.text(0.505, -0.75, "chance", fontsize=8, ha="left", va="center", color="k", clip_on=False)
+    ax.text(0.492, 2.5, "chance", fontsize=8, ha="right", va="center", color="k", rotation=90)
     ax.set_yticks(y); ax.set_yticklabels([r[0] for r in rows], fontsize=9)
     ax.set_xlabel("tumor-level histology AUC (leave-one-tumor-out)  ·  bars = DeLong 95% CI")
     ax.set_xlim(0.30, 1.0)
     ax.set_title("Phase B · anaplasia from H&E — real but resolution-capped at ~0.73\n"
                  "MIL vs mean-pool paired DeLong p=0.83 · ensemble vs embedding p=0.57", fontsize=10.5, loc="left")
     fig.tight_layout()
-    out = figdir / "phase_b_rigor_auc.png"; fig.savefig(out); plt.close(fig)
+    out = figdir / "phase_b_histology_auc.png"; fig.savefig(out); plt.close(fig)
     return out
 
 
@@ -111,7 +110,7 @@ def fig_abm(cfg, figdir):
     ax1.axhline(1.0, color=C_REF, ls="--", lw=0.9)
     ax1.set_xticks([0, 1]); ax1.set_xticklabels(["no-relapse", "relapse"])
     ax1.set_ylabel("ABM proliferation-rate multiplier")
-    ax1.set_title("ABM1 · proliferation parameter\nencodes the relapse biology", fontsize=10.5, loc="left")
+    ax1.set_title("ABM proliferation parameter\nby relapse status", fontsize=10.5, loc="left")
 
     # initial compartment fractions, tumors sorted by epithelial (composition positive)
     ti = t.sort_values("init_epithelial").reset_index(drop=True)
@@ -121,10 +120,10 @@ def fig_abm(cfg, figdir):
         bottom += ti[comp].values
     ax2.set_xlim(-0.5, len(ti) - 0.5); ax2.set_ylim(0, 1)
     ax2.set_xlabel("tumors (sorted by epithelial fraction)"); ax2.set_ylabel("initial cell-type fraction")
-    ax2.set_title("ABM1 · per-tumor initial conditions\nfrom compartment composition", fontsize=10.5, loc="left")
+    ax2.set_title("Per-tumor initial conditions\nfrom compartment composition", fontsize=10.5, loc="left")
     ax2.legend(fontsize=8, ncol=3, loc="upper center", frameon=False, bbox_to_anchor=(0.5, -0.18))
     fig.tight_layout()
-    out = figdir / "abm_rigor_params.png"; fig.savefig(out); plt.close(fig)
+    out = figdir / "abm_parameters.png"; fig.savefig(out); plt.close(fig)
     return out
 
 
