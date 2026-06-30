@@ -15,7 +15,13 @@ pyarrow>=15.0
 tifffile>=2024.2
 imageio>=2.34
 
-# Optional — heavy; install for real segmentation
-# stardist>=0.9
-# csbdeep>=0.8
-# cellpose>=3.0
+# Phase B — foundation-model embeddings (Phikon) + attention-MIL
+torch>=2.2
+torchvision>=0.17
+transformers>=4.40
+
+# Phase B — StarDist nuclei segmentation (needs a TensorFlow backend)
+tensorflow-cpu>=2.15
+stardist>=0.9
+csbdeep>=0.8
+# cellpose>=3.0  # optional segmentation fallback

@@ -16,6 +16,7 @@ dependencies:
   - r-remotes
   - pip
   - pip:
+      # core analysis
       - scanpy>=1.10
       - anndata>=0.10
       - scikit-learn>=1.4
@@ -23,18 +24,27 @@ dependencies:
       - scipy>=1.12
       - numpy>=1.26
       - pandas>=2.1
-pip install scanpy scikit-learn scikit-image opencv-python-headless pyarrow pyyaml matplotlib seaborn scipy stardist
+      - matplotlib>=3.8
+      - seaborn>=0.13
       - pyyaml>=6.0
       - pytest>=8.0
       - opencv-python-headless>=4.9
-      - stardist>=0.9
-      - csbdeep>=0.8
-      - cellpose>=3.0
+      - pyarrow>=15.0
       - tifffile>=2024.2
       - imageio>=2.34
-      - pyarrow>=15.0
+      # Phase B foundation-model embeddings (Phikon) + MIL
+      - torch>=2.2
+      - torchvision>=0.17
+      - transformers>=4.40
+      # Phase B nuclei segmentation (StarDist needs a TensorFlow backend)
+      - tensorflow-cpu>=2.15
+      - stardist>=0.9
+      - csbdeep>=0.8
 
-# R packages not on conda — install after env create:
+# R packages not on conda — install after env create (or via scripts/install_r_packages.R):
+#   install.packages(c("transport", "maotai", "logistf"))
+#   BiocManager::install(c("ConsensusClusterPlus", "edgeR", "limma", "fgsea", "msigdbr"))
 #   remotes::install_github("AlexsLemonade/ScPCAr")
-#   BiocManager::install(c("ConsensusClusterPlus", "waddR"))
-#   install.packages(c("transport", "maotai"))
+# Phase A omics: edgeR/limma (moderated DE), fgsea+msigdbr (GSEA), logistf (Firth prognostics).
+# The Wasserstein location/size/shape decomposition is computed in base R (waddR has no
+# current Bioconductor binary), so no waddR dependency is required.

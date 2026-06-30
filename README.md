@@ -110,6 +110,7 @@ Raw data are **never committed**; provenance logged in `data/raw/scpca_access_lo
 | Items | `04_wasserstein_matrix.R` | Groups = (compartment × histology); **≥25 cells** rule |
 | Distance | `04_wasserstein_matrix.R` | **1-D Wasserstein-1 only** on score distributions (`transport` package) |
 | Clustering | `05_consensus_cluster.R` | ConsensusClusterPlus PAM; k via low **PAC** + high **Calinski–Harabasz** |
+| Decomposition | `06_wasserstein_decompose.R` | location/size/shape split of W1 (Schefzik decomposition, base R), joined to patient-level FDR |
 | Switches | `07_mechanotype_switches.R` | Flag compartment if cluster assignment differs favorable vs anaplastic |
 | Composition | `12_composition_analysis.R` | Per-sample compartment fractions; CLR-Wilcoxon, patient-level, BH-FDR |
 | Moderated DE | `14_moderated_de.R` | Pseudobulk **edgeR-QLF** + **limma-voom**, histology & relapse axes |
@@ -146,6 +147,15 @@ spread, and shape a difference-in-means misses. Each program's pairwise W1 matri
 scores** (multivariate W1 is unstable on scRNA-seq). *Result:* with valid labels and patient-level
 stats, **no** compartment shifts its within-compartment distribution (0/36 tests at BH-FDR; figure,
 left). The machinery is sound — the phenomenon isn't there, which redirects to *where* it is.
+
+*Decomposing what little distance there is* (`06_wasserstein_decompose.R`): the closed-form
+location/size/shape split of the 2-Wasserstein distance (the Schefzik et al. decomposition that
+`waddR` implements — computed directly in base R, as `waddR` has no current Bioconductor binary)
+shows the distances are **small (W₁ ≈ 0.04–0.25) and shape-dominated**, not driven by a mean shift —
+and, again, **0/18 are patient-level significant**. So even the *form* of the (non-)difference is
+not a clean location shift.
+
+![Wasserstein location/size/shape decomposition](results/figures/wasserstein_decomposition.png)
 
 **2 · Compartment composition — positive.** The *relative abundance* of compartments differs by
 histology: epithelial fraction ↑ in anaplastic (0.59 vs 0.44, BH-p=0.004), PV/mature-epithelial
@@ -301,6 +311,7 @@ scripts\run_figures.bat
 | [`phase_a_gsea_de.png`](results/figures/phase_a_gsea_de.png) | Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts |
 | [`phase_b_histology_auc.png`](results/figures/phase_b_histology_auc.png) | Histology AUC forest with DeLong 95% CIs (watershed→StarDist→Phikon→MIL→ensemble) |
 | [`phase_a_negatives.png`](results/figures/phase_a_negatives.png) | Phase A negatives: distributional mechanotype (0/36) + Welch-vs-moderated DE |
+| [`wasserstein_decomposition.png`](results/figures/wasserstein_decomposition.png) | W1 location/size/shape decomposition per program × compartment |
 | [`phase_b_composition_negative.png`](results/figures/phase_b_composition_negative.png) | Phase B negative: H&E → compartment composition (LOTO *r*≈0 vs controls) |
 | [`abm_parameters.png`](results/figures/abm_parameters.png) | ABM proliferation multiplier by relapse + per-tumor initial fractions |
 
@@ -314,16 +325,24 @@ Segmentation overlays: `data/processed/nuclei/overlays/`
 ### 1. Environment
 
 ```powershell
-# Python deps (Phase B)
-pip install scanpy scikit-learn scikit-image opencv-python-headless pyarrow pyyaml matplotlib seaborn scipy
+# Python deps (Phase B): core + Phikon embeddings + StarDist/TensorFlow
+pip install -r requirements.txt
+#   core    : scanpy scikit-learn scikit-image opencv-python-headless pyarrow scipy matplotlib seaborn
+#   FM/MIL  : torch torchvision transformers
+#   segment : tensorflow-cpu stardist csbdeep
 
-# R 4.x + packages (Phase A)
+# R 4.x + packages (Phase A): mechanotype, edgeR/limma, fgsea/msigdbr, logistf
 winget install RProject.R
 scripts\rscript.bat scripts\install_r_packages.R
 scripts\rscript.bat scripts\scpca_auth.R   # optional for API download
 ```
 
 Or: `conda env create -f environment.yml && conda activate sc-wilms-data`
+
+> **Windows note:** StarDist's `2D_versatile_he` model loads via a directory *junction*
+> (created automatically; avoids the admin requirement of a symlink). `edgeR/limma/fgsea/
+> msigdbr` install as Bioconductor binaries; `waddR` is not required (the W1 decomposition is
+> computed in base R).
 
 ### 2. Metadata (no download)
 
@@ -403,7 +422,7 @@ sc-wilms-data/
 1. **Compartment assignment** uses fetal-kidney signatures on tumor cells; validate against spatial/IHC ground truth where available.
 2. **Phase A coverage:** only ~30% of nuclei map confidently to a compartment after the margin gate.
 3. **Segmentation:** StarDist `2D_versatile_he` needs a Windows directory *junction* (not a symlink — avoids the admin requirement) to load.
-4. **waddR decomposition** (`06_waddR_decompose.R`): optional location/shape/size interpretation.
+4. **Wasserstein decomposition** (`06_wasserstein_decompose.R`): the location/size/shape split is descriptive of the (small, non-significant) within-compartment distances; it is not a significance test.
 5. **PhysiCell:** initial-condition mapping is produced (`positives_to_physicell.yaml`); the simulation itself needs the PhysiCell binary on a cluster.
 
 ### Externally-gated extensions

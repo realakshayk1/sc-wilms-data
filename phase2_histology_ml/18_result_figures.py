@@ -198,10 +198,38 @@ def fig_phase_b_composition_negative(cfg, figdir):
     return out
 
 
+def fig_wasserstein_decomp(cfg, figdir):
+    """Location/size/shape decomposition of the (small) within-compartment W1 distances."""
+    d = pd.read_csv(resolve_path(cfg, "results/mechanotypes/wasserstein_decomposition.csv"))
+    d = d[d["contrast"] == "histology"].copy()
+    d["label"] = d["feature"].str.replace("_program", "").str.replace("_", " ") + " · " + d["cell_state"]
+    d = d.sort_values("d_wass", ascending=True)
+    y = np.arange(len(d))
+    fig, ax = plt.subplots(figsize=(9.5, 6))
+    left = np.zeros(len(d))
+    for comp, col, lab in [("perc_location", C_DN, "location (mean shift)"),
+                           ("perc_size", C_MORPH, "size (spread)"),
+                           ("perc_shape", C_UP, "shape")]:
+        ax.barh(y, d[comp], left=left, color=col, alpha=0.9, label=lab)
+        left += d[comp].values
+    for yi, dw in zip(y, d["d_wass"]):
+        ax.text(101, yi, f"W₁={dw:.3f}", va="center", fontsize=7, color="#444")
+    ax.set_yticks(y); ax.set_yticklabels(d["label"], fontsize=7.5)
+    ax.set_xlim(0, 100); ax.set_xlabel("% of squared 2-Wasserstein distance")
+    ax.legend(fontsize=8, frameon=False, loc="lower right", ncol=3, bbox_to_anchor=(1.0, -0.13))
+    ax.set_title("Wasserstein decomposition (favorable vs anaplastic, per program × compartment)\n"
+                 "distances are small and shape-dominated — 0/18 patient-level significant",
+                 fontsize=10.5, loc="left")
+    fig.tight_layout()
+    out = figdir / "wasserstein_decomposition.png"; fig.savefig(out); plt.close(fig)
+    return out
+
+
 def main():
     cfg = load_config()
     figdir = resolve_path(cfg, "results/figures"); figdir.mkdir(parents=True, exist_ok=True)
-    for fn in (fig_phase_a, fig_phase_a_negatives, fig_phase_b, fig_phase_b_composition_negative, fig_abm):
+    for fn in (fig_phase_a, fig_phase_a_negatives, fig_wasserstein_decomp, fig_phase_b,
+               fig_phase_b_composition_negative, fig_abm):
         print(f"[ok] {fn(cfg, figdir)}")
 
 
