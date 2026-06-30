@@ -16,13 +16,14 @@ Computational pipeline connecting the Radhakrishnan lab's **Wasserstein mechanot
 4. [Phase A — Mechanotypes (snRNA-seq)](#phase-a--mechanotypes-snrna-seq)
 5. [Phase B — Histology ML (Visium H&E)](#phase-b--histology-ml-visium-he)
 6. [Results summary](#results-summary)
-7. [ABM initial conditions](#abm-initial-conditions-physicell)
-8. [Figure gallery](#figure-gallery)
-9. [Quick start](#quick-start)
-10. [Repository layout](#repository-layout)
-11. [Configuration](#configuration)
-12. [Limitations & next steps](#limitations--next-steps)
-13. [References & citation](#references--citation)
+7. [Methods tried & what they taught us](#methods-tried--what-they-taught-us)
+8. [ABM initial conditions](#abm-initial-conditions-physicell)
+9. [Figure gallery](#figure-gallery)
+10. [Quick start](#quick-start)
+11. [Repository layout](#repository-layout)
+12. [Configuration](#configuration)
+13. [Limitations & next steps](#limitations--next-steps)
+14. [References & citation](#references--citation)
 
 ---
 
@@ -122,6 +123,28 @@ Methods log: `results/mechanotypes/phase_a_methods.yaml`
 - **Patient is the unit of inference:** histology/relapse contrasts are tested across the ~40 samples, never across cells (cell-level testing is pseudoreplication and inflates significance).
 - **1-D Wasserstein only:** multivariate Wasserstein on gene matrices underperforms on scRNA-seq (lab benchmark); W1 runs only on the predefined 1-D scores.
 - **Match the instrument to the biology:** the same data is interrogated by distributional, compositional, single-gene DE, and pathway tests — and the signal is reported wherever it actually lives (composition + pathway here), with method-robust negatives reported as negatives.
+
+### What the Wasserstein mechanotype measures
+
+Most single-cell comparisons collapse a cell group to a **mean** or a **proportion**. The
+mechanotype approach instead compares the **whole distribution** of a program's activity. For two
+1-D score distributions, the **Wasserstein-1 (earth-mover's) distance** is the area between their
+cumulative distribution functions — the minimum "work" to reshape one into the other — so it
+responds to differences in **location, spread, and shape** that a difference-in-means misses
+(two groups can share a mean yet differ in how bimodal or heavy-tailed a program is).
+
+Per program, the pairwise W1 matrix over (compartment × histology) groups is **consensus-clustered**
+into distributional classes — the "mechanotypes" — and a compartment is said to **switch
+mechanotype** if its class differs between favorable and anaplastic. W1 is applied **only to the
+predefined 1-D scores**: multivariate Wasserstein is statistically unstable on high-dimensional
+scRNA-seq (lab benchmark), so the high-dim gene matrix is never passed to it.
+
+**Outcome for Wilms — a method-robust negative.** With valid (fetal-kidney) labels and
+patient-level statistics, **no** compartment shows a within-compartment distributional shift
+(0/18 at BH-FDR, both axes). The machinery is sound; the phenomenon simply isn't there — the
+favorable/anaplastic and relapse signal lives in **compartment composition** and a **relapse
+proliferation program**, neither of which a *within-compartment distribution* comparison can see.
+That negative is exactly what motivated the composition / moderated-DE / pathway analyses below.
 
 ### Phase A results
 
@@ -225,6 +248,29 @@ Details: `phase_b_mil_phikon-v2.json`, `stardist_morphology.json`, `fm_embedding
 | **H&E predicts continuous composition** | No — LOTO *r*≈0 (FM + hand-crafted); H&E sets growth regime, not fine composition |
 | **ABM initial conditions** | Per-tumor PhysiCell parameters from composition + proliferation + anaplasia |
 | Reproducible repo | Pinned env, numbered scripts, config-driven paths, DeLong/permutation/Firth stats, unit tests |
+
+---
+
+## Methods tried & what they taught us
+
+Several approaches were tried and ruled out. Each negative is **method-robust** (held out,
+FDR/permutation-corrected) and pointed to the analysis that did work — they are findings, not
+dead ends.
+
+| Approach | What it tested | Outcome | What it taught us |
+|----------|----------------|---------|-------------------|
+| **Wasserstein-1 distributional mechanotype** | within-compartment shifts in the *distribution* of program activity | ✗ 0/18 BH-FDR (both axes) | the signal is **compositional + pathway-level**, not a within-compartment distribution shift (explained above) |
+| **Reference / `cellassign` cell labels** | compartment identity | ✗ invalid for WT | reference annotations call tumor cells "hemangioblast/trophoblast/Unknown" → assign from **fetal-kidney signatures** instead |
+| **Cell-level permutation testing** | contrast significance | ✗ anti-conservative (every p≈0.001) | cells within a tumor aren't independent (pseudoreplication) → permute labels **across patients** |
+| **Welch t-test pseudobulk DE** | single-gene differential expression | ✗ ~0 genes at FDR<0.05 | underpowered at n≈20/group → empirical-Bayes moderation (**edgeR-QLF / limma-voom**) recovers 130 |
+| **Watershed nuclei segmentation** | nuclear morphology → histology | ✗ AUC 0.39 (worse than chance) | classical segmentation is too weak on hires tiles → **StarDist** lifts it to 0.687 |
+| **H&E → continuous composition regression** (hand-crafted + Phikon) | read 3-compartment fractions from morphology | ✗ leave-one-tumor-out *r*≈0 | H&E carries the tumor's **regime** (anaplasia), not fine composition; resolution-bound |
+| **Scale spots + ViT-L encoder + attention-MIL** | lift the histology AUC | ✗ 0.724→0.748, MIL vs mean-pool p=0.83 | ~0.73 is a **Visium-hires resolution ceiling**, not a modeling gap |
+| **Morphology + embedding ensemble** | add signal orthogonal to the embedding | ✗ no gain (paired p=0.57) | both modalities read the **same** nuclear atypia |
+
+What survived these is in [Results summary](#results-summary): compartment composition, the
+relapse proliferation program (DE + GSEA + prognostics), H&E anaplasia classification, and the
+StarDist morphology fix.
 
 ---
 
