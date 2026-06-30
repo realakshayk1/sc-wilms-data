@@ -257,6 +257,14 @@ Several approaches were tried and ruled out. Each negative is **method-robust** 
 FDR/permutation-corrected) and pointed to the analysis that did work — they are findings, not
 dead ends.
 
+![Methods that didn't work](results/figures/methods_negatives.png)
+
+*Left:* every within-compartment Wasserstein test sits far below the BH-FDR=0.05 line (0/36).
+*Middle:* the Welch t-test finds ~0 single-gene hits where edgeR-QLF moderation finds up to 130.
+*Right:* H&E→compartment-composition regression gives held-out *r*≈0, indistinguishable from
+shuffled/random controls. (The watershed-segmentation, scale/MIL, and ensemble negatives are in
+the [Phase B AUC forest](#phase-b--histology-ml-visium-he).)
+
 | Approach | What it tested | Outcome | What it taught us |
 |----------|----------------|---------|-------------------|
 | **Wasserstein-1 distributional mechanotype** | within-compartment shifts in the *distribution* of program activity | ✗ 0/18 BH-FDR (both axes) | the signal is **compositional + pathway-level**, not a within-compartment distribution shift (explained above) |
@@ -319,6 +327,7 @@ scripts\run_figures.bat
 | [`phase_a_gsea_de.png`](results/figures/phase_a_gsea_de.png) | Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts |
 | [`phase_b_histology_auc.png`](results/figures/phase_b_histology_auc.png) | Histology AUC forest with DeLong 95% CIs (watershed→StarDist→Phikon→MIL→ensemble) |
 | [`abm_parameters.png`](results/figures/abm_parameters.png) | ABM proliferation multiplier by relapse + per-tumor initial fractions |
+| [`methods_negatives.png`](results/figures/methods_negatives.png) | Method-robust negatives: distributional mechanotype, Welch DE, H&E→composition |
 
 Phase A/B figures regenerate with `08_figures.R` + `python phase2_histology_ml/18_result_figures.py`.
 Segmentation overlays: `data/processed/nuclei/overlays/`

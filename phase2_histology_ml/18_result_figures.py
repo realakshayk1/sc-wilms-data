@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Result figures for Phase A (GSEA + moderated DE), Phase B (histology AUC), and the ABM mapping.
 
-Reads the result artifacts and renders three PNGs into results/figures/:
-  phase_a_gsea_de.png  — Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts
-  phase_b_histology_auc.png   — tumor-level histology AUC forest with DeLong 95% CIs
-  abm_parameters.png    — ABM proliferation multiplier by relapse (biology -> parameter)
+Reads the result artifacts and renders four PNGs into results/figures/:
+  phase_a_gsea_de.png       — Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts
+  phase_b_histology_auc.png — tumor-level histology AUC forest with DeLong 95% CIs
+  abm_parameters.png        — ABM proliferation multiplier by relapse (biology -> parameter)
+  methods_negatives.png     — method-robust negatives (distributional mechanotype, Welch DE,
+                              H&E -> compartment composition)
 All values are read from disk; nothing is hard-coded except reference baselines.
 """
 from __future__ import annotations
@@ -127,10 +129,73 @@ def fig_abm(cfg, figdir):
     return out
 
 
+def fig_negatives(cfg, figdir):
+    """The method-robust negatives: distributional mechanotype, Welch DE, H&E->composition."""
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 4.6))
+
+    # (a) distributional mechanotype: Cliff's delta vs -log10(BH-FDR), nothing crosses 0.05
+    dv = []
+    for f, axis in [("results/mechanotypes/distributional_validation.csv", "histology"),
+                    ("results/mechanotypes/distributional_validation_relapse.csv", "relapse")]:
+        p = resolve_path(cfg, f)
+        if p.exists():
+            d = pd.read_csv(p); d["axis"] = d.get("contrast", axis); dv.append(d)
+    thr = -np.log10(0.05)
+    if dv:
+        dv = pd.concat(dv, ignore_index=True)
+        for axis, col in [("histology", C_DN), ("relapse", C_UP)]:
+            s = dv[dv["axis"].astype(str).str.contains(axis, case=False)]
+            if len(s):
+                ax1.scatter(s["cliffs_delta"], -np.log10(s["p_perm_BH"].clip(lower=1e-6)),
+                            s=42, color=col, alpha=0.8, edgecolor="white", linewidth=0.5, label=axis)
+        nsig = int((dv["p_perm_BH"] < 0.05).sum())
+        ax1.legend(fontsize=8, frameon=False, loc="upper right")
+        ax1.set_title(f"Distributional mechanotype (Wasserstein-1)\n{nsig}/{len(dv)} tests significant",
+                      fontsize=10.5, loc="left")
+    ax1.axhline(thr, color="k", ls="--", lw=0.9)
+    ax1.text(ax1.get_xlim()[0], thr + 0.03, "BH-FDR = 0.05", fontsize=7.5, va="bottom")
+    ax1.set_xlabel("Cliff's δ (effect size)"); ax1.set_ylabel("−log₁₀(BH-FDR)")
+
+    # (b) single-gene DE: Welch t-test vs moderated (edgeR-QLF), FDR<0.05 counts
+    welch = pd.read_csv(resolve_path(cfg, "results/mechanotypes/de_summary.csv"))
+    mod = pd.read_csv(resolve_path(cfg, "results/mechanotypes/moderated_de_summary.csv"))
+    key = ["scope", "contrast"]
+    m = welch[key + ["n_fdr05"]].merge(mod[key + ["edgeR_fdr05"]], on=key, how="inner")
+    m["label"] = (m["scope"] + " · " + m["contrast"].str.replace("_vs_", " v ").str.replace("_", " "))
+    m = m.sort_values("edgeR_fdr05")
+    y = np.arange(len(m)); h = 0.38
+    ax2.barh(y + h / 2, m["edgeR_fdr05"], h, color=C_UP, alpha=0.9, label="edgeR-QLF (moderated)")
+    ax2.barh(y - h / 2, m["n_fdr05"], h, color=C_REF, alpha=0.9, label="Welch t-test")
+    ax2.set_yticks(y); ax2.set_yticklabels(m["label"], fontsize=7.5)
+    ax2.set_xlabel("genes at FDR < 0.05")
+    ax2.set_title("Single-gene DE: Welch t-test fails\n(moderation recovers it)", fontsize=10.5, loc="left")
+    ax2.legend(fontsize=8, frameon=False, loc="lower right")
+
+    # (c) H&E -> compartment composition: LOTO r for real vs shuffled vs random controls
+    reg = json.loads(resolve_path(cfg, "results/classifier/fm_embedding_regression_phikon.json").read_text())
+    comps = ["blastemal", "epithelial", "stromal"]
+    series = [("real", C_MORPH), ("negative_control_shuffled", C_DN), ("negative_control_random", C_REF)]
+    x = np.arange(len(comps)); w = 0.26
+    for i, (k, col) in enumerate(series):
+        vals = [reg[k][c][0] for c in comps]; errs = [reg[k][c][1] for c in comps]
+        ax3.bar(x + (i - 1) * w, vals, w, yerr=errs, capsize=3, color=col, alpha=0.9,
+                label=k.replace("negative_control_", "").replace("real", "real features"))
+    ax3.axhline(0, color="k", lw=0.8)
+    ax3.set_xticks(x); ax3.set_xticklabels(comps)
+    ax3.set_ylabel("held-out (LOTO) Pearson r"); ax3.set_ylim(-0.2, 0.2)
+    ax3.set_title("H&E → compartment composition\nr ≈ 0 (≈ shuffled/random controls)", fontsize=10.5, loc="left")
+    ax3.legend(fontsize=7.5, frameon=False, loc="upper right")
+
+    fig.suptitle("Methods that didn't work — method-robust negatives", fontsize=12, x=0.01, ha="left")
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    out = figdir / "methods_negatives.png"; fig.savefig(out); plt.close(fig)
+    return out
+
+
 def main():
     cfg = load_config()
     figdir = resolve_path(cfg, "results/figures"); figdir.mkdir(parents=True, exist_ok=True)
-    for fn in (fig_phase_a, fig_phase_b, fig_abm):
+    for fn in (fig_phase_a, fig_phase_b, fig_abm, fig_negatives):
         print(f"[ok] {fn(cfg, figdir)}")
 
 
