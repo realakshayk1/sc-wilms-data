@@ -1,10 +1,10 @@
 # sc-wilms-data
 
-**Wilms tumor distributional mechanotypes + histology-informed spatial composition**
+**Wilms tumor compartment heterogeneity → histology-informed spatial ABM**
 
-Computational pipeline connecting **Wasserstein mechanotyping framework** (Phase A) to **Visium H&E morphology ML** (Phase B) for the public ScPCA cohort [**SCPCP000006**](https://scpca.alexslemonade.org/projects/SCPCP000006) — paired snRNA-seq, Visium spatial transcriptomics, H&E images, and bulk RNA-seq from favorable and anaplastic Wilms tumors.
+Computational pipeline that characterizes how Wilms tumor's **blastemal / epithelial / stromal** compartments differ between **favorable and anaplastic** histology (Phase A, snRNA-seq) and tests whether routine **H&E** can supply spatially-resolved initial conditions for a **PhysiCell** agent-based model (Phase B). Built on the public ScPCA cohort [**SCPCP000006**](https://scpca.alexslemonade.org/projects/SCPCP000006) — paired snRNA-seq, Visium spatial transcriptomics, H&E images, and bulk RNA-seq.
 
-> **Scientific goal:** Identify how whole *distributions* of interpretable molecular programs differ across Wilms compartments and histology, then validate whether H&E-derived spatial cell-state composition agrees with transcriptomics — a prerequisite for morphology-informed agent-based models (PhysiCell).
+> **Scientific goal:** Localize *where* the favorable/anaplastic and relapse signal lives across Wilms compartments — testing composition, program-activity distributions, differential expression, and pathways — and determine whether H&E recovers enough of it to seed a PhysiCell ABM. Methods from the Radhakrishnan lab's mechanobiology framework (distributional "mechanotypes" via Wasserstein-1; PhysiCell) are applied as one set of lenses among several, with the signal reported wherever it actually appears.
 
 ---
 
@@ -28,9 +28,9 @@ Computational pipeline connecting **Wasserstein mechanotyping framework** (Phase
 
 ## Background
 
-Wilms tumor (nephroblastoma) is morphologically organized into **blastemal**, **epithelial**, and **stromal** compartments, with clinically dominant **favorable vs anaplastic** histology. Most single-cell analyses compare *means* or cluster proportions; this repo implements the lab's alternative: compare **entire distributions** of predefined 1-D program scores via **Wasserstein-1 distance** and **consensus clustering**, then ask which compartments **switch mechanotype** between histology groups.
+Wilms tumor (nephroblastoma) is morphologically organized into **blastemal**, **epithelial**, and **stromal** compartments, with clinically dominant **favorable vs anaplastic** histology. Phase A asks *where* the favorable/anaplastic and relapse signal lives by interrogating the snRNA-seq with several lenses — the lab's **distributional mechanotype** (whole-distribution shifts via **Wasserstein-1** + **consensus clustering**), compartment **composition**, moderated **differential expression**, and **pathway enrichment** — and reporting the signal wherever it actually appears. For Wilms the answer is **compositional + pathway-level** (a relapse-associated proliferation program), not a within-compartment distributional shift.
 
-Separately, spatial ABM models often assume uniform or deconvolution-only initial conditions. Phase B extracts compartment fractions from paired H&E at nucleus resolution and compares them to the same gene programs measured in Visium spots.
+Separately, spatial ABM models often assume uniform or deconvolution-only initial conditions. Phase B tests what paired **H&E** can recover: it robustly reads **anaplasia** (the prognostically decisive nuclear-atypia phenotype) but **not** continuous compartment composition — so H&E contributes the tumor's growth *regime*, while compartment fractions for the ABM come from the transcriptomic deconvolution.
 
 ---
 
@@ -43,13 +43,16 @@ flowchart TB
     VIS[Visium + H&E 41 samples]
   end
 
-  subgraph phaseA [Phase A — Mechanotypes R]
-    QC[QC + cell-state mapping]
+  subgraph phaseA [Phase A — snRNA-seq R]
+    QC[QC + fetal-kidney labels]
     SC[1-D program scores]
-    W1[Wasserstein-1 per feature]
-    CC[ConsensusClusterPlus]
-    SW[Mechanotype switches]
-    QC --> SC --> W1 --> CC --> SW
+    W1[Wasserstein mechanotype]
+    COMP[Compartment composition]
+    DE[Moderated DE + Hallmark GSEA]
+    QC --> SC
+    SC --> W1
+    QC --> COMP
+    QC --> DE
   end
 
   subgraph phaseB [Phase B — Histology ML Python]
@@ -67,7 +70,8 @@ flowchart TB
 
   SN --> QC
   VIS --> TIL
-  CC --> PC
+  SC -. spot weak labels .-> CLS
+  COMP --> PC
   CLS --> PC
 ```
 
@@ -101,11 +105,12 @@ Raw data are **never committed**; provenance logged in `data/raw/scpca_access_lo
 | Step | Script | Method |
 |------|--------|--------|
 | Ingest | `scripts/ingest_manual_scpca.R` | Load merged SCE; join `subdiagnosis` histology |
-| QC | `02_qc_normalize.R` | ≥200 genes/cell; map OpenScPCA `cellassign` → blastemal/epithelial/stromal |
+| QC + labels | `02_qc_normalize.R` | ≥200 genes/cell; assign compartments from **fetal-kidney signatures** (CM/UB/PV/fibroblast, `config/cell_signatures.yaml`) on tumor cells — gene-wise z-scored module scores + top-vs-runner-up margin gate |
 | Scores | `03_compute_scores.R` | **Fixed** gene programs (`config/features.yaml`): log1p(CPM<sub>pos</sub>) − log1p(CPM<sub>neg</sub>) via `gene_symbol` |
 | Items | `04_wasserstein_matrix.R` | Groups = (compartment × histology); **≥25 cells** rule |
 | Distance | `04_wasserstein_matrix.R` | **1-D Wasserstein-1 only** on score distributions (`transport` package) |
 | Clustering | `05_consensus_cluster.R` | ConsensusClusterPlus PAM; k via low **PAC** + high **Calinski–Harabasz** |
+| Decomposition | `06_wasserstein_decompose.R` | location/size/shape split of W1 (Schefzik decomposition, base R), joined to patient-level FDR |
 | Switches | `07_mechanotype_switches.R` | Flag compartment if cluster assignment differs favorable vs anaplastic |
 | Composition | `12_composition_analysis.R` | Per-sample compartment fractions; CLR-Wilcoxon, patient-level, BH-FDR |
 | Moderated DE | `14_moderated_de.R` | Pseudobulk **edgeR-QLF** + **limma-voom**, histology & relapse axes |
@@ -117,42 +122,67 @@ Methods log: `results/mechanotypes/phase_a_methods.yaml`
 
 ### Key design choices
 
-- **No feature fishing:** six programs predefined before clustering (blastemal, epithelial, stromal, proliferation, WT1, Wnt/β-catenin).
-- **1-D Wasserstein:** multivariate Wasserstein on gene matrices underperforms on scRNA-seq (benchmarked in lab framework).
-- **Cell-state mapping:** `cellassign_celltype_annotation` → Wilms compartments (Kidney progenitor → blastemal, Podocyte → epithelial, etc.). ~61k / 200k cells map; unmapped cells excluded from mechanotyping.
+- **No feature fishing:** the program list is predefined before clustering (blastemal, epithelial, stromal, proliferation, WT1, Wnt/β-catenin); sensitivity to it is reported rather than tuned.
+- **Compartment labels from fetal-kidney biology:** reference/`cellassign` annotations call WT tumor cells "hemangioblast/trophoblast/Unknown" and cannot separate the three compartments, so compartments are assigned from **fetal-kidney developmental signatures** on tumor cells (z-scored module scores + margin gate).
+- **Patient is the unit of inference:** histology/relapse contrasts are tested across the ~40 samples, never across cells (cell-level testing is pseudoreplication and inflates significance).
+- **1-D Wasserstein only:** multivariate Wasserstein on gene matrices underperforms on scRNA-seq (lab benchmark); W1 runs only on the predefined 1-D scores.
+- **Match the instrument to the biology:** the same data is interrogated by distributional, compositional, single-gene DE, and pathway tests — and the signal is reported wherever it actually lives (composition + pathway here), with method-robust negatives reported as negatives.
 
-### Phase A results
+### Phase A results — approaches in sequence
 
-Compartments are assigned from **fetal-kidney developmental signatures** (cap mesenchyme,
-ureteric bud, primitive vesicle, fibroblast; `config/cell_signatures.yaml`) on tumor cells.
-All inference is **patient-level** — labels are contrasted across the ~40 samples, never across
-cells (cell-level testing is pseudoreplication) — with BH-FDR within each analysis.
+Compartments are assigned from **fetal-kidney developmental signatures** on tumor cells; all
+inference is **patient-level** (labels contrasted across the ~40 samples, never across cells),
+with BH-FDR within each analysis. Five lenses were applied in order; the signal surfaces in the
+last four.
 
-Wilms histology separates along two molecular dimensions:
+![Phase A negatives — distributional mechanotype and Welch DE](results/figures/phase_a_negatives.png)
 
-**1 · Compartment composition** (the histology axis). The *relative abundance* of compartments
-differs by histology: epithelial fraction ↑ in anaplastic (0.59 vs 0.44, BH-p=0.004), the
-PV/mature-epithelial subgroup ↑ in anaplastic (BH-p=0.005), stromal ↑ in favorable (BH-p=0.038).
-Within-compartment program *distributions*, by contrast, do not differ (0/18 at BH-FDR<0.05 on
-both axes): the histology signal lives in composition, not in shifted distributions of program
-activity.
+**1 · Distributional mechanotype (Wasserstein-1) — negative.** Rather than compare means, the
+mechanotype lens compares the **whole distribution** of a program's activity: for two 1-D score
+distributions the **Wasserstein-1 (earth-mover's) distance** is the area between their cumulative
+distributions — the minimum "work" to reshape one into the other — so it sees shifts in location,
+spread, and shape a difference-in-means misses. Each program's pairwise W1 matrix over
+(compartment × histology) groups is consensus-clustered into "mechanotypes" (a compartment
+*switches* if its class differs favorable vs anaplastic); W1 runs **only on the predefined 1-D
+scores** (multivariate W1 is unstable on scRNA-seq). *Result:* with valid labels and patient-level
+stats, **no** compartment shifts its within-compartment distribution (0/36 tests at BH-FDR; figure,
+left). The machinery is sound — the phenomenon isn't there, which redirects to *where* it is.
 
-**2 · A proliferative transcriptional program** (the relapse axis), resolved at three levels:
+*Decomposing what little distance there is* (`06_wasserstein_decompose.R`): the closed-form
+location/size/shape split of the 2-Wasserstein distance (the Schefzik et al. decomposition that
+`waddR` implements — computed directly in base R, as `waddR` has no current Bioconductor binary)
+shows the distances are **small (W₁ ≈ 0.04–0.25) and shape-dominated**, not driven by a mean shift —
+and, again, **0/18 are patient-level significant**. So even the *form* of the (non-)difference is
+not a clean location shift.
+
+![Wasserstein location/size/shape decomposition](results/figures/wasserstein_decomposition.png)
+
+**2 · Compartment composition — positive.** The *relative abundance* of compartments differs by
+histology: epithelial fraction ↑ in anaplastic (0.59 vs 0.44, BH-p=0.004), PV/mature-epithelial
+subgroup ↑ in anaplastic (BH-p=0.005), stromal ↑ in favorable (BH-p=0.038). The histology signal
+lives in composition, not in distribution shape.
+
+**3 · Single-gene differential expression — Welch fails, moderation recovers.** A Welch t-test on
+pseudobulk finds ~0 genes at FDR<0.05 (underpowered at n≈20/group; figure, right). Empirical-Bayes
+moderation (**edgeR-QLF / limma-voom**, `14_moderated_de.R`) recovers **130 genes FDR<0.05** for
+histology (NOTCH2, PODXL, PTPRO, DACT3) and 39 for relapse.
+
+**4 · Pathway enrichment — positive.** Full Hallmark GSEA (`15_hallmark_gsea.R`, fgsea on the
+moderated *t*) gives **166 significant pathway-contrasts**; on the relapse axis **E2F_TARGETS
+(q=9e-29)**, **G2M_CHECKPOINT**, **MYC_TARGETS** are up, replicated in the epithelial (q=4e-28) and
+stromal (q=6e-30) compartments.
 
 ![Phase A — Hallmark GSEA and moderated DE](results/figures/phase_a_gsea_de.png)
 
-| Analysis | Script | Result |
-|----------|--------|--------|
-| **Moderated DE** | `14_moderated_de.R` | edgeR-QLF: **130 genes FDR<0.05** for histology (NOTCH2, PODXL, PTPRO, DACT3), 39 for relapse |
-| **Hallmark GSEA** | `15_hallmark_gsea.R` | **166 significant pathway-contrasts**; on the relapse axis **E2F_TARGETS (q=9e-29)**, **G2M_CHECKPOINT**, **MYC_TARGETS** are up, replicated in the epithelial (q=4e-28) and stromal (q=6e-30) compartments |
-| **Prognostics** | `16_prognostic_association.R` | A pseudobulk **proliferation score predicts relapse** (Firth OR≈4/SD, p=0.013; Fisher OR 7.6, p=0.017) — nominal (not BH-FDR-significant; n=10 relapse) |
+**5 · Prognostic association — nominal.** A pseudobulk proliferation score predicts relapse (Firth
+OR≈4/SD, p=0.013; Fisher OR 7.6, p=0.017; `16_prognostic_association.R`) — reported as nominal
+(doesn't survive BH-FDR or covariate adjustment; OS unmodelable, `vital_status` has 5 deaths).
 
-The relapse axis — **higher cell-cycle/E2F/G2M/MYC activity** — is the canonical aggressive-tumor
-program and matches the literature ([Yang 2025](https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2025.1539897/full); TP53/anaplasia). Gene-level DE,
-pathway GSEA, and patient-level prognostics converge on it independently. Overall survival is not
-modelable in this cohort (`vital_status` has only 5 deaths).
+**Convergence.** The relapse axis — higher cell-cycle/E2F/G2M/MYC activity — is recovered
+independently by gene-level DE, pathway GSEA, and patient-level prognostics, and matches the
+literature ([Yang 2025](https://www.frontiersin.org/journals/immunology/articles/10.3389/fimmu.2025.1539897/full); TP53/anaplasia).
 
-Details: `composition_analysis.csv`, `moderated_de.csv`, `hallmark_gsea.csv`, `prognostic_association.csv`
+Details: `composition_analysis.csv`, `distributional_validation*.csv`, `moderated_de.csv`, `hallmark_gsea.csv`, `prognostic_association.csv`
 
 ---
 
@@ -169,20 +199,35 @@ Details: `composition_analysis.csv`, `moderated_de.csv`, `hallmark_gsea.csv`, `p
 | Embeddings | `15_phase_b_mil.py` | **Phikon-v2** (ViT-L, 1024-d) tile embeddings, 200 spots/tumor |
 | Classifier | `14`/`15_phase_b_mil.py` | Histology (anaplasia) from embeddings — mean-pool + **attention-MIL**, leave-one-tumor-out |
 | Morphology | `16_stardist_morphology.py` | Per-tumor nuclear-atypia features (giant-nucleus fraction, pleomorphism) → RF; embedding ensemble |
+| Composition | `12_spot_composition_regression.py`, `13_fm_embedding_regression.py` | Cross-modal LOTO regression: predict per-spot compartment fractions from morphology / FM embeddings (negative, with shuffled + random controls) |
 | Stats | `phase_b_stats.py` | **DeLong** AUC CIs, label-permutation p, paired DeLong |
 | ABM | `06`/`17_positives_to_abm.py` | Map composition + proliferation + anaplasia → per-tumor PhysiCell parameters |
 | Figures | `07_figures.py`, `18_result_figures.py` | Deconv scatter, AUC forest, ABM parameter panels |
 
 Methods log: `results/classifier/phase_b_methods.json` · Config: `config/phase_b.yaml`
 
-### Phase B results
+### Phase B results — approaches in sequence
 
-Full cohort: **41 tumors, ~260k Visium spots, H&E at hires resolution.**
+Full cohort: **41 tumors, ~260k Visium spots, H&E at hires resolution.** Everything is held out
+**leave-one-tumor-out**, with DeLong 95% CIs and label-permutation p.
 
-**Reading anaplasia from H&E.** Unfavorable histology is *defined* by nuclear atypia (giant,
-hyperchromatic, pleomorphic nuclei; [Vujanić 2024](https://onlinelibrary.wiley.com/doi/full/10.1002/pbc.31000)) — the signal H&E carries
-natively. Tumor-level classification of anaplastic vs favorable, held out across tumors
-(leave-one-tumor-out), with DeLong 95% CIs and label-permutation p:
+**1 · H&E → continuous compartment composition — negative.** The first question was whether
+aggregated morphology predicts the per-spot transcriptomic compartment *fractions* (the cheap
+proxy the ABM would ideally use). It does not: leave-one-tumor-out Pearson *r* ≈ 0 for both
+hand-crafted nucleus features and Phikon embeddings — indistinguishable from shuffled-target and
+random-feature controls.
+
+![Phase B — H&E to composition is negative](results/figures/phase_b_composition_negative.png)
+
+**2 · Nuclear morphology → anaplasia.** Unfavorable histology is *defined* by nuclear atypia
+([Vujanić 2024](https://onlinelibrary.wiley.com/doi/full/10.1002/pbc.31000)), so the next target is histology itself. Classical **watershed**
+segmentation → morphology features fails (AUC **0.39**, worse than chance); the learned **StarDist**
+`2D_versatile_he` model lifts the same pipeline to **0.687** (p=0.021). Segmentation, not the
+hypothesis, was the bottleneck.
+
+**3 · Foundation-model embeddings → anaplasia — the positive.** Phikon-v2 tile embeddings classify
+anaplastic vs favorable at the tumor level: mean-pool **0.733**, attention-MIL **0.748** (perm
+p=0.003).
 
 ![Phase B — histology AUC forest](results/figures/phase_b_histology_auc.png)
 
@@ -193,21 +238,17 @@ natively. Tumor-level classification of anaplastic vs favorable, held out across
 | StarDist nuclear morphology | 0.687 | [0.50, 0.83] | 0.021 |
 | Ensemble (morphology + embedding) | 0.719 | [0.53, 0.85] | 0.009 |
 
-All models predict anaplasia significantly above chance. The signal **saturates near AUC
-~0.73–0.75**: attention-MIL is statistically indistinguishable from flat mean-pooling (paired
-DeLong p=0.83), and the morphology+embedding ensemble does not exceed the embedding alone
-(p=0.57) — both read the same nuclear atypia, bounded by Visium-hires tile resolution (median ~14
-segmentable nuclei/tumor). Learned StarDist segmentation is essential: classical watershed
-morphology reaches only AUC 0.39.
+**4 · Pushing the ceiling — no further gain.** Scaling spots 60→200, the ViT-L encoder, and
+attention-MIL move AUC only 0.724→0.748, and MIL is indistinguishable from flat mean-pooling
+(paired DeLong p=0.83); a morphology+embedding **ensemble** does not beat the embedding alone
+(p=0.57). The ~0.73 plateau is a **Visium-hires resolution ceiling** (median ~14 segmentable
+nuclei/tumor), not a modeling gap.
 
-**H&E does not read continuous composition.** The complementary cross-modal task — predicting
-per-spot transcriptomic compartment *fractions* from morphology — is a clean negative:
-leave-one-tumor-out Pearson *r* ≈ 0 for both hand-crafted features and FM embeddings (≈
-shuffled/random controls). H&E therefore sets the tumor's **growth regime** (anaplastic ⇒
-aggressive); fine compartment composition for ABM initial conditions comes from the transcriptomic
-deconvolution.
+**Conclusion.** H&E robustly reads **anaplasia** — the tumor's growth *regime* — but not continuous
+compartment composition. So for the ABM, H&E sets the regime while compartment fractions come from
+the transcriptomic deconvolution.
 
-Details: `phase_b_mil_phikon-v2.json`, `stardist_morphology.json`, `fm_embedding_regression_phikon.json`
+Details: `fm_embedding_regression_phikon.json`, `stardist_morphology.json`, `phase_b_mil_phikon-v2.json`
 
 ---
 
@@ -269,6 +310,9 @@ scripts\run_figures.bat
 | [`mechanotype_switches.png`](results/figures/mechanotype_switches.png) | Bar chart of switches (from script 07) |
 | [`phase_a_gsea_de.png`](results/figures/phase_a_gsea_de.png) | Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts |
 | [`phase_b_histology_auc.png`](results/figures/phase_b_histology_auc.png) | Histology AUC forest with DeLong 95% CIs (watershed→StarDist→Phikon→MIL→ensemble) |
+| [`phase_a_negatives.png`](results/figures/phase_a_negatives.png) | Phase A negatives: distributional mechanotype (0/36) + Welch-vs-moderated DE |
+| [`wasserstein_decomposition.png`](results/figures/wasserstein_decomposition.png) | W1 location/size/shape decomposition per program × compartment |
+| [`phase_b_composition_negative.png`](results/figures/phase_b_composition_negative.png) | Phase B negative: H&E → compartment composition (LOTO *r*≈0 vs controls) |
 | [`abm_parameters.png`](results/figures/abm_parameters.png) | ABM proliferation multiplier by relapse + per-tumor initial fractions |
 
 Phase A/B figures regenerate with `08_figures.R` + `python phase2_histology_ml/18_result_figures.py`.
@@ -281,16 +325,24 @@ Segmentation overlays: `data/processed/nuclei/overlays/`
 ### 1. Environment
 
 ```powershell
-# Python deps (Phase B)
-pip install scanpy scikit-learn scikit-image opencv-python-headless pyarrow pyyaml matplotlib seaborn scipy
+# Python deps (Phase B): core + Phikon embeddings + StarDist/TensorFlow
+pip install -r requirements.txt
+#   core    : scanpy scikit-learn scikit-image opencv-python-headless pyarrow scipy matplotlib seaborn
+#   FM/MIL  : torch torchvision transformers
+#   segment : tensorflow-cpu stardist csbdeep
 
-# R 4.x + packages (Phase A)
+# R 4.x + packages (Phase A): mechanotype, edgeR/limma, fgsea/msigdbr, logistf
 winget install RProject.R
 scripts\rscript.bat scripts\install_r_packages.R
 scripts\rscript.bat scripts\scpca_auth.R   # optional for API download
 ```
 
 Or: `conda env create -f environment.yml && conda activate sc-wilms-data`
+
+> **Windows note:** StarDist's `2D_versatile_he` model loads via a directory *junction*
+> (created automatically; avoids the admin requirement of a symlink). `edgeR/limma/fgsea/
+> msigdbr` install as Bioconductor binaries; `waddR` is not required (the W1 decomposition is
+> computed in base R).
 
 ### 2. Metadata (no download)
 
@@ -334,16 +386,16 @@ scripts\rscript.bat -e "testthat::test_dir('tests', filter = 'phase1')"
 ```
 sc-wilms-data/
 ├── config/                  # paths.yaml, features.yaml, phase_b.yaml, physicell.yaml
-├── phase1_mechanotypes/     # R: 00–08 numbered scripts
-├── phase2_histology_ml/     # Python: 01–07 numbered scripts
+├── phase1_mechanotypes/     # R: 00–16 numbered scripts (mechanotype, composition, DE, GSEA, prognostics)
+├── phase2_histology_ml/     # Python: 00–18 numbered scripts (tiles, embeddings, MIL, StarDist, ABM, figures)
 ├── scripts/                 # ingest, run_phase_*.bat, fetch metadata
 ├── data/raw/                # gitignored ScPCA downloads
-├── data/processed/          # gitignored intermediates (SCE, scores, tiles, nuclei)
+├── data/processed/          # gitignored intermediates (SCE, scores, tiles, nuclei, embeddings)
 ├── results/
-│   ├── mechanotypes/        # consensus RDS, switches CSV, methods YAML
-│   ├── classifier/        # model, metrics, deconv JSON
+│   ├── mechanotypes/        # composition, moderated DE, GSEA, prognostics CSVs; consensus RDS
+│   ├── classifier/          # histology AUC + MIL/StarDist JSON, deconv/composition JSON
 │   ├── figures/             # analysis figures (PNG)
-│   └── abm/                 # PhysiCell stub outputs
+│   └── abm/                 # per-tumor PhysiCell parameters (YAML + CSV)
 ├── tests/
 ├── PRD.md                   # requirements & acceptance criteria
 ├── AGENTS.md                # agent/human coding rules
@@ -367,10 +419,10 @@ sc-wilms-data/
 
 ## Limitations & next steps
 
-1. **Cellassign → compartment mapping** is approximate; refine with OpenScPCA/Wilms-specific labels.
-2. **Phase A coverage:** only ~30% of nuclei map to three compartments after QC.
+1. **Compartment assignment** uses fetal-kidney signatures on tumor cells; validate against spatial/IHC ground truth where available.
+2. **Phase A coverage:** only ~30% of nuclei map confidently to a compartment after the margin gate.
 3. **Segmentation:** StarDist `2D_versatile_he` needs a Windows directory *junction* (not a symlink — avoids the admin requirement) to load.
-4. **waddR decomposition** (`06_waddR_decompose.R`): optional location/shape/size interpretation.
+4. **Wasserstein decomposition** (`06_wasserstein_decompose.R`): the location/size/shape split is descriptive of the (small, non-significant) within-compartment distances; it is not a significance test.
 5. **PhysiCell:** initial-condition mapping is produced (`positives_to_physicell.yaml`); the simulation itself needs the PhysiCell binary on a cluster.
 
 ### Externally-gated extensions

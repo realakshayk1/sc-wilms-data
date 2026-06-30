@@ -13,7 +13,8 @@ message("[lib] ", user_lib)
 
 pkgs_cran <- c(
   "remotes", "yaml", "dplyr", "tidyr", "ggplot2", "Matrix",
-  "transport", "testthat"
+  "transport", "testthat",
+  "logistf"   # Firth penalized logistic (prognostics, 16_prognostic_association.R)
 )
 for (p in pkgs_cran) {
   if (!requireNamespace(p, quietly = TRUE)) {
@@ -24,7 +25,11 @@ for (p in pkgs_cran) {
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager", repos = "https://cloud.r-project.org")
 }
-bioc <- c("SingleCellExperiment", "SummarizedExperiment", "ConsensusClusterPlus", "waddR")
+# edgeR/limma: moderated pseudobulk DE; fgsea+msigdbr: Hallmark GSEA.
+# (waddR is omitted — no current Bioconductor binary; the W1 location/size/shape
+#  decomposition is computed directly in base R in 06_wasserstein_decompose.R.)
+bioc <- c("SingleCellExperiment", "SummarizedExperiment", "ConsensusClusterPlus",
+          "edgeR", "limma", "fgsea", "msigdbr")
 for (p in bioc) {
   if (!requireNamespace(p, quietly = TRUE)) {
     message("Installing ", p, " (Bioconductor) ...")

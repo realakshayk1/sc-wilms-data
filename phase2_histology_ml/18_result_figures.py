@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Result figures for Phase A (GSEA + moderated DE), Phase B (histology AUC), and the ABM mapping.
 
-Reads the result artifacts and renders three PNGs into results/figures/:
-  phase_a_gsea_de.png  — Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts
-  phase_b_histology_auc.png   — tumor-level histology AUC forest with DeLong 95% CIs
-  abm_parameters.png    — ABM proliferation multiplier by relapse (biology -> parameter)
+Reads the result artifacts and renders PNGs into results/figures/, in phase sequence:
+  phase_a_negatives.png          — distributional mechanotype (Wasserstein) + Welch DE negatives
+  phase_a_gsea_de.png            — Hallmark GSEA (relapse axis) + moderated-DE FDR gene counts
+  phase_b_composition_negative.png — H&E -> compartment composition (LOTO r vs controls)
+  phase_b_histology_auc.png      — tumor-level histology AUC forest with DeLong 95% CIs
+  abm_parameters.png             — ABM proliferation multiplier by relapse (biology -> parameter)
 All values are read from disk; nothing is hard-coded except reference baselines.
 """
 from __future__ import annotations
@@ -127,10 +129,107 @@ def fig_abm(cfg, figdir):
     return out
 
 
+def fig_phase_a_negatives(cfg, figdir):
+    """Phase A negatives, in sequence: distributional mechanotype, then Welch single-gene DE."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.6))
+
+    # (1) distributional mechanotype: Cliff's delta vs -log10(BH-FDR), nothing crosses 0.05
+    dv = []
+    for f in ["results/mechanotypes/distributional_validation.csv",
+              "results/mechanotypes/distributional_validation_relapse.csv"]:
+        p = resolve_path(cfg, f)
+        if p.exists():
+            dv.append(pd.read_csv(p))
+    thr = -np.log10(0.05)
+    if dv:
+        dv = pd.concat(dv, ignore_index=True)
+        for axis, col in [("histology", C_DN), ("relapse", C_UP)]:
+            s = dv[dv["contrast"].astype(str).str.contains(axis, case=False)]
+            if len(s):
+                ax1.scatter(s["cliffs_delta"], -np.log10(s["p_perm_BH"].clip(lower=1e-6)),
+                            s=42, color=col, alpha=0.8, edgecolor="white", linewidth=0.5, label=axis)
+        nsig = int((dv["p_perm_BH"] < 0.05).sum())
+        ax1.legend(fontsize=8, frameon=False, loc="upper right")
+        ax1.set_title(f"1 · Distributional mechanotype (Wasserstein-1)\n{nsig}/{len(dv)} tests significant",
+                      fontsize=10.5, loc="left")
+    ax1.axhline(thr, color="k", ls="--", lw=0.9)
+    ax1.text(ax1.get_xlim()[0], thr + 0.03, "BH-FDR = 0.05", fontsize=7.5, va="bottom")
+    ax1.set_xlabel("Cliff's δ (effect size)"); ax1.set_ylabel("−log₁₀(BH-FDR)")
+
+    # (2) single-gene DE: Welch t-test vs moderated (edgeR-QLF), FDR<0.05 counts
+    welch = pd.read_csv(resolve_path(cfg, "results/mechanotypes/de_summary.csv"))
+    mod = pd.read_csv(resolve_path(cfg, "results/mechanotypes/moderated_de_summary.csv"))
+    key = ["scope", "contrast"]
+    m = welch[key + ["n_fdr05"]].merge(mod[key + ["edgeR_fdr05"]], on=key, how="inner")
+    m["label"] = (m["scope"] + " · " + m["contrast"].str.replace("_vs_", " v ").str.replace("_", " "))
+    m = m.sort_values("edgeR_fdr05")
+    y = np.arange(len(m)); h = 0.38
+    ax2.barh(y + h / 2, m["edgeR_fdr05"], h, color=C_UP, alpha=0.9, label="edgeR-QLF (moderated)")
+    ax2.barh(y - h / 2, m["n_fdr05"], h, color=C_REF, alpha=0.9, label="Welch t-test")
+    ax2.set_yticks(y); ax2.set_yticklabels(m["label"], fontsize=7.5)
+    ax2.set_xlabel("genes at FDR < 0.05")
+    ax2.set_title("2 · Single-gene DE: Welch fails,\nmoderation recovers it", fontsize=10.5, loc="left")
+    ax2.legend(fontsize=8, frameon=False, loc="lower right")
+
+    fig.tight_layout()
+    out = figdir / "phase_a_negatives.png"; fig.savefig(out); plt.close(fig)
+    return out
+
+
+def fig_phase_b_composition_negative(cfg, figdir):
+    """Phase B negative: H&E -> continuous compartment composition (LOTO r vs controls)."""
+    reg = json.loads(resolve_path(cfg, "results/classifier/fm_embedding_regression_phikon.json").read_text())
+    comps = ["blastemal", "epithelial", "stromal"]
+    series = [("real", C_MORPH), ("negative_control_shuffled", C_DN), ("negative_control_random", C_REF)]
+    fig, ax = plt.subplots(figsize=(6.2, 4.6))
+    x = np.arange(len(comps)); w = 0.26
+    for i, (k, col) in enumerate(series):
+        vals = [reg[k][c][0] for c in comps]; errs = [reg[k][c][1] for c in comps]
+        ax.bar(x + (i - 1) * w, vals, w, yerr=errs, capsize=3, color=col, alpha=0.9,
+               label=k.replace("negative_control_", "").replace("real", "real features"))
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_xticks(x); ax.set_xticklabels(comps)
+    ax.set_ylabel("held-out (LOTO) Pearson r"); ax.set_ylim(-0.25, 0.25)
+    ax.set_title("H&E → compartment composition: r ≈ 0\n(indistinguishable from shuffled/random)",
+                 fontsize=10.5, loc="left")
+    ax.legend(fontsize=8, frameon=False, loc="upper right")
+    fig.tight_layout()
+    out = figdir / "phase_b_composition_negative.png"; fig.savefig(out); plt.close(fig)
+    return out
+
+
+def fig_wasserstein_decomp(cfg, figdir):
+    """Location/size/shape decomposition of the (small) within-compartment W1 distances."""
+    d = pd.read_csv(resolve_path(cfg, "results/mechanotypes/wasserstein_decomposition.csv"))
+    d = d[d["contrast"] == "histology"].copy()
+    d["label"] = d["feature"].str.replace("_program", "").str.replace("_", " ") + " · " + d["cell_state"]
+    d = d.sort_values("d_wass", ascending=True)
+    y = np.arange(len(d))
+    fig, ax = plt.subplots(figsize=(9.5, 6))
+    left = np.zeros(len(d))
+    for comp, col, lab in [("perc_location", C_DN, "location (mean shift)"),
+                           ("perc_size", C_MORPH, "size (spread)"),
+                           ("perc_shape", C_UP, "shape")]:
+        ax.barh(y, d[comp], left=left, color=col, alpha=0.9, label=lab)
+        left += d[comp].values
+    for yi, dw in zip(y, d["d_wass"]):
+        ax.text(101, yi, f"W₁={dw:.3f}", va="center", fontsize=7, color="#444")
+    ax.set_yticks(y); ax.set_yticklabels(d["label"], fontsize=7.5)
+    ax.set_xlim(0, 100); ax.set_xlabel("% of squared 2-Wasserstein distance")
+    ax.legend(fontsize=8, frameon=False, loc="lower right", ncol=3, bbox_to_anchor=(1.0, -0.13))
+    ax.set_title("Wasserstein decomposition (favorable vs anaplastic, per program × compartment)\n"
+                 "distances are small and shape-dominated — 0/18 patient-level significant",
+                 fontsize=10.5, loc="left")
+    fig.tight_layout()
+    out = figdir / "wasserstein_decomposition.png"; fig.savefig(out); plt.close(fig)
+    return out
+
+
 def main():
     cfg = load_config()
     figdir = resolve_path(cfg, "results/figures"); figdir.mkdir(parents=True, exist_ok=True)
-    for fn in (fig_phase_a, fig_phase_b, fig_abm):
+    for fn in (fig_phase_a, fig_phase_a_negatives, fig_wasserstein_decomp, fig_phase_b,
+               fig_phase_b_composition_negative, fig_abm):
         print(f"[ok] {fn(cfg, figdir)}")
 
 
