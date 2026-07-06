@@ -18,8 +18,30 @@ grammar-enabled PhysiCell (≥1.14.1).
 | 3 | `03_emit_rules.py` | `rules.csv` (+ `rules_annotated.csv`) — grammar, saturation anchored to base rates |
 | 4 | `04_build_model.py` | `PhysiCell_settings.xml` + `provenance.json` — domain + oxygen + cell defs |
 
-Downstream (cluster / follow-up): `05_uq.py` sensitivity, `06_run_cohort.sh` SLURM array,
-`07_validate.py` emergent (patient-level growth/invasion) + spatial (squidpy) QoIs.
+Downstream: `05_uq.py` sensitivity sweep, `06_run_cohort.sh` SLURM array (cluster),
+`07_validate.py` emergent (patient-level growth/invasion) + spatial QoIs.
+
+## Spatial validation QoIs (`07_validate.py`)
+
+Compartment architecture that the simulated tissue must reproduce, computed on the real
+Visium now and on simulated endpoints later:
+
+- **Neighbourhood enrichment** — permutation z-score of compartment adjacency on a spatial
+  kNN graph (one number per compartment pair).
+- **Co-occurrence curve** — co-location enrichment **vs distance** (a curve, not a scalar):
+  `P(neighbour is B | centre is A, at range r) / P(B)`. >1 co-locate, <1 segregate.
+- **Ripley's L** (squidpy only) — multi-scale clustering vs dispersion.
+
+Both the enrichment and the co-occurrence curve are implemented in-house (scipy kNN +
+`cKDTree.count_neighbors`), so the default install needs no extra dependency and they are
+always computed. Set `spatial_qoi.backend: squidpy` (or `auto`, which uses squidpy when
+importable) to *also* emit squidpy's battle-tested nhood z-scores and **Ripley's L** as a
+cross-check (`pip install squidpy`). This is opt-in because Ripley is ~O(n²) over
+full-resolution spots; the in-house path stays the fast default.
+
+Observed baseline (real Visium): blastemal↔epithelial **co-locate** at short range
+(enrichment z ≈ +2.5; near-range co-occurrence ≈ 1.3), stromal **segregates** from both
+(z ≈ −8; co-occurrence < 1) — the nephrogenic transition vs the stromal compartment.
 
 ## Run
 

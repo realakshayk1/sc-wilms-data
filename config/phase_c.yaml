@@ -32,6 +32,17 @@ domain:
   margin_um: 100.0                # padding around the tumor bounding box
   z_um: 0.0                       # 2-D monolayer for v1
 
+# Spatial validation QoIs (07_validate.py). co-occurrence is evaluated on a distance grid
+# (multiples of the spot pitch); neighbourhood enrichment uses a kNN graph.
+spatial_qoi:
+  # inhouse (default, fast, no extra deps) is always computed. Set 'squidpy' or 'auto'
+  # (squidpy if importable) to ALSO emit squidpy nhood z + Ripley's L — slower (Ripley is
+  # ~O(n^2) over full-resolution spots), so opt in explicitly rather than by default.
+  backend: inhouse                # inhouse | auto | squidpy
+  knn: 6                          # Visium hex neighbourhood
+  n_perm: 1000                    # enrichment permutations
+  cooccur_radii_um: [50, 100, 150, 200, 300, 400, 500, 700, 1000]
+
 simulation:
   max_time_min: 4320              # 3 days
   save_interval_min: 60

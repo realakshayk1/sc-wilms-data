@@ -40,6 +40,14 @@ dependencies:
       - tensorflow-cpu>=2.15
       - stardist>=0.9
       - csbdeep>=0.8
+      # Phase C ABM authoring
+      - statsmodels>=0.14        # patient-level emergent test (BH-FDR)
+      # Phase C spatial validation — OPTIONAL. 07_validate.py runs an in-house
+      # neighbourhood-enrichment + co-occurrence with scipy alone; installing squidpy
+      # additionally emits its battle-tested nhood z-scores and Ripley's L.
+      # - squidpy>=1.4
+      # Phase C: parse PhysiCell output on the cluster (not needed for authoring)
+      # - pcdl>=3.0
 
 # R packages not on conda — install after env create (or via scripts/install_r_packages.R):
 #   install.packages(c("transport", "maotai", "logistf"))

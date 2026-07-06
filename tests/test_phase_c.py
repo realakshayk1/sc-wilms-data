@@ -115,6 +115,41 @@ def test_neighbor_enrichment_detects_segregation():
     assert cross < 0 < same                               # segregation
 
 
+def test_cooccurrence_detects_colocation_and_segregation():
+    v = _load("07_validate.py")
+    # two spatially separated blocks -> at short range same-type co-locates (>1),
+    # cross-type segregates (<1)
+    left = np.column_stack([np.zeros(60), np.linspace(0, 60, 60)])
+    right = np.column_stack([np.full(60, 300.0), np.linspace(0, 60, 60)])
+    coords = np.vstack([left, right])
+    labels = np.array(["blastemal"] * 60 + ["stromal"] * 60)
+    df = v.co_occurrence(coords, labels, ["blastemal", "stromal"],
+                         radii=[10, 30, 60, 120, 240, 480])
+    near = df[df.r_um <= 60]
+    same = near[(near.cond == "blastemal") & (near.exp == "blastemal")]["cooccur"].mean()
+    cross = near[(near.cond == "blastemal") & (near.exp == "stromal")]["cooccur"].mean()
+    assert same > 1.0 > cross
+
+
+def test_squidpy_extras_if_installed():
+    """When squidpy is present, the optional backend returns a coherent nhood z-matrix
+    and a Ripley's L table. Skipped otherwise (squidpy is an optional dependency)."""
+    v = _load("07_validate.py")
+    if not v.has_squidpy():
+        pytest.skip("squidpy not installed (optional)")
+    rng = np.random.default_rng(0)
+    left = np.column_stack([rng.normal(0, 5, 120), rng.normal(0, 5, 120)])
+    right = np.column_stack([rng.normal(200, 5, 120), rng.normal(0, 5, 120)])
+    coords = np.vstack([left, right])
+    labels = np.array(["blastemal"] * 120 + ["stromal"] * 120)
+    ex = v.squidpy_extras(coords, labels, v.COMPARTMENTS, knn=6, n_perm=100, seed=0)
+    z = ex["nhood_z"]
+    assert "blastemal" in z.index and "stromal" in z.index
+    # same-type adjacency enriched vs cross-type (segregated blocks)
+    assert z.loc["blastemal", "blastemal"] > z.loc["blastemal", "stromal"]
+    assert not ex["ripley_L"].empty
+
+
 def test_emergent_test_direction_and_fdr():
     import pandas as pd
     v = _load("07_validate.py")
