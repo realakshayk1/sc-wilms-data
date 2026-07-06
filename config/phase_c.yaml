@@ -1,0 +1,50 @@
+# Phase C — spatial agent-based model (PhysiCell) configuration.
+# Authoring runs on CPU; the simulations themselves run on a cluster.
+seed: 42
+
+compartments: [blastemal, epithelial, stromal]   # v1 granularity
+
+# Visium capture geometry (10x). spot_diameter_fullres in scalefactors_json maps to
+# SPOT_DIAMETER_UM; center-to-center pitch is fixed at 100 um on the standard array.
+spot:
+  diameter_um: 55.0
+  pitch_um: 100.0
+  place_radius_um: 27.5          # jitter agents within half the spot diameter
+
+# Initial cell number per Visium location (N_cells_per_location prior).
+# NOTE: StarDist here runs on hires spot tiles and undercounts absolute nuclei (the
+# documented resolution ceiling) — it is trustworthy for morphology, not for absolute
+# counts. So the default prior is a literature value for a 55 um capture spot in dense
+# small-round-blue-cell tumor (~10-15 cells); 'stardist' is available for relative
+# per-spot variation once WSI-resolution segmentation exists.
+density:
+  source: fixed                  # fixed | stardist
+  fixed_n: 12                    # literature prior, cells per 55 um spot
+  min_n: 1
+  max_n: 40
+
+# Which spot-level fractions seed agent identities.
+deconvolution:
+  backend: program_softmax        # program_softmax | nnls | cell2location
+  frac_cols: [deconv_blastemal, deconv_epithelial, deconv_stromal]
+
+domain:
+  margin_um: 100.0                # padding around the tumor bounding box
+  z_um: 0.0                       # 2-D monolayer for v1
+
+simulation:
+  max_time_min: 4320              # 3 days
+  save_interval_min: 60
+  replicates: 20                  # per tumor (cluster)
+
+# One-at-a-time sensitivity analysis (perturb each uncertain parameter by +/- pct).
+# Base values are the defaults used by Stages 3-4; the cluster wrapper applies the
+# per-run override to rules.csv / PhysiCell_settings.xml.
+uq:
+  pct_levels: [1, 5, 10, 20]      # symmetric +/- perturbations, percent
+  params:
+    oxygen_cycle_half_max: 10.0   # rules: oxygen -> cycle entry half-max (mmHg)
+    oxygen_necrosis_half_max: 5.0 # rules: oxygen -> necrosis half-max (mmHg)
+    pressure_half_max: 1.0        # rules: pressure -> cycle entry half-max
+    adhesion_strength: 0.4        # mechanics base (overridden per tumor if present)
+    proliferation_saturation: 1.0 # multiplier on rule saturation values

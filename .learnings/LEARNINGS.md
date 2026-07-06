@@ -2,6 +2,20 @@
 
 Accumulated lessons for this repo. Newest first.
 
+### [gotcha] Phase C: StarDist counts undercount cells/spot — 2026-07-06
+- What happened: nuclei-per-spot from the StarDist hires-tile run come out ~1 (median),
+  far below the true ~10-15 cells in a 55 µm Visium spot. Using it as
+  `N_cells_per_location` gives implausibly sparse ABMs.
+- Rule for next time: StarDist here is for morphology, not absolute counts (resolution
+  ceiling). Default `config/phase_c.yaml density.source: fixed` (literature prior);
+  reserve `stardist` for relative variation once WSI-resolution segmentation exists.
+- See also: phase3_abm/01_spot_density.py, 02_place_agents.py
+
+### [knowledge] Phase C: Visium px→µm affine — 2026-07-06
+- Full-res pixel spot centres → microns via `spot_diameter_fullres` from
+  scalefactors_json (µm/px = 55 / spot_diameter_fullres); isotropic, recentre to origin.
+- See also: phase3_abm/abm_utils.py:um_per_pixel, load_spot_coords_um
+
 ### [better-approach] StarDist fixes the watershed morphology failure; ensemble adds nothing — 2026-06-29
 - What happened: watershed nuclear-morphology -> histology AUC was 0.39 (worse than chance).
   StarDist '2D_versatile_he' at prob_thresh=0.4 (default 0.69 detects ~0 nuclei on 96px hires
