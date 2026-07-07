@@ -6,6 +6,9 @@ results/*
 !results/figures/
 !results/figures/**
 
+# internal planning notes (not part of the public repo)
+phase3_abm/PLAN.md
+
 # secrets
 .env
 *.token
