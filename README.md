@@ -162,6 +162,15 @@ histology: epithelial fraction ↑ in anaplastic (0.59 vs 0.44, BH-p=0.004), PV/
 subgroup ↑ in anaplastic (BH-p=0.005), stromal ↑ in favorable (BH-p=0.038). The histology signal
 lives in composition, not in distribution shape.
 
+![Phase A — compartment composition by clinical axis](results/figures/phase_a_composition.png)
+
+*What it shows.* Mean per-sample compartment fraction, split by the two clinical axes.
+*What it measures.* Each patient contributes one fraction vector; bars are group means, tested
+patient-level with a CLR-Wilcoxon (BH-FDR). *Result.* **Histology (left):** epithelial fraction is
+higher in anaplastic (0.59 vs 0.44) and stromal is higher in favorable — the histology signal is
+compositional. **Relapse (right):** composition barely moves, consistent with the relapse signal
+living in a proliferation *program* (below) rather than in compartment proportions.
+
 **3 · Single-gene differential expression — Welch fails, moderation recovers.** A Welch t-test on
 pseudobulk finds ~0 genes at FDR<0.05 (underpowered at n≈20/group; figure, right). Empirical-Bayes
 moderation (**edgeR-QLF / limma-voom**, `14_moderated_de.R`) recovers **130 genes FDR<0.05** for
@@ -268,9 +277,26 @@ against independent necrosis QC (mitochondrial fraction, genes-detected) and aud
 Cohort caveat: only **11/38** spatial tumors are post-chemotherapy (10 anaplastic), so the
 treatment axis is confounded. Scripts: `19` pilot · `20` regressive-balanced re-embed · `21` rigor
 · `22` audit · `23` generic-CNN ablation · `24` quality-confound control on the necrosis target ·
-`25` SpotSweeper-style de-speckle + fibrosis/macrophage broadening. Figures:
-[`regressive_pilot_summary.png`](results/figures/regressive_pilot_summary.png),
-[`regressive_pilot_spatialmaps.png`](results/figures/regressive_pilot_spatialmaps.png).
+`25` SpotSweeper-style de-speckle + fibrosis/macrophage broadening.
+
+![Regressive extension — ratio, H&E readout, per-spot readout](results/figures/regressive_pilot_summary.png)
+
+*What it shows / measures / result.* **Left** — per-tumor % regressive tissue, upfront vs
+post-chemotherapy: post-chemo trends higher (as expected for therapy-induced regression) but
+weakly (Mann-Whitney p=0.19) and confounded (10/11 post-chemo tumors are anaplastic). **Middle** —
+tumor-level H&E readout: mean Phikon-v2 embedding → % regressive, held-out Pearson *r* against
+shuffled-label and random-feature null controls (real signal sits above both nulls). **Right** —
+per-spot H&E readout AUC: at chance, the resolution ceiling. *(This figure shows the low-UMI
+label-fraction target; the audit's robust headline — H&E → mean mitochondrial fraction,
+**r=0.56, CI [0.36, 0.81]** — is in the result JSONs.)*
+
+![Regressive extension — spatial maps of regressive vs viable tissue](results/figures/regressive_pilot_spatialmaps.png)
+
+*What it shows / measures / result.* The six tumors with the most regressive tissue; every Visium
+spot at its array coordinate, coloured **regressive (red)** vs **viable (blue)**. Regression forms
+coherent contiguous territories — rim/margin bands and geographic patches, not scattered noise —
+which the rigor pass confirmed is ~93% genuine (only ~7% isolated technical dropout; interior-only
+neighbourhood clustering z≈7.9).
 
 **Bottom line:** H&E gives a real, modest, pathology-specific **necrosis-burden ratio** and a
 **spatial map** now; per-spot localization and full-regression specificity are externally gated
