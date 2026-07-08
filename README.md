@@ -250,6 +250,32 @@ the transcriptomic deconvolution.
 
 Details: `fm_embedding_regression_phikon.json`, `stardist_morphology.json`, `phase_b_mil_phikon-v2.json`
 
+### Phase B extension — viable-blastemal vs necrotic/regressive tissue
+
+A follow-up pilot (`19`–`25`) asks whether H&E gives the **ratio** and **spatial position** of
+*regressive* (necrotic/therapy-changed) tissue, reusing the same tiles / Phikon-v2 embeddings /
+StarDist. A weak regressive label (per-spot low-UMI **and** depleted viable-program) is validated
+against independent necrosis QC (mitochondrial fraction, genes-detected) and audited hard
+(bootstrap CI, permutation, quality-confound control, model/rank robustness, threshold sweep).
+
+| Question | Result |
+|----------|--------|
+| **Ratio** — per-tumor necrosis burden from H&E | **Yes.** Mean Phikon-v2 embedding → per-tumor mean mito% (an independent necrosis readout), LOTO **Pearson r=0.56, 95% CI [0.36, 0.81]**; survives a tissue-quality confound control (partial *r*=0.55), model-consistent (Ridge≈RF), pathology-specific (Phikon 0.34 vs generic ResNet 0.19). |
+| **Positions** — spatial map | Regression forms coherent tissue territories (interior-only neighbourhood z≈7.9); a SpotSweeper-style local-outlier QC flags only ~7% of the label as isolated technical dropout. |
+| **Positions from the image** — per-spot | **No.** Balanced LOTO AUC ≈0.52 (chance) — a Visium-hires resolution ceiling; needs whole-slide images. |
+| **Full SIOP regression** (necrosis + fibrosis + xanthomatous) | Necrosis is only ~10% of total regression (necrosis 2% / fibrotic 7% / xanthomatous 12% / broad 21%), but the cellular forms conflate with native stroma/TAMs by signature alone → needs pathology annotation (a *demonstrated* ask, not a solved measurement). |
+
+Cohort caveat: only **11/38** spatial tumors are post-chemotherapy (10 anaplastic), so the
+treatment axis is confounded. Scripts: `19` pilot · `20` regressive-balanced re-embed · `21` rigor
+· `22` audit · `23` generic-CNN ablation · `24` quality-confound control on the necrosis target ·
+`25` SpotSweeper-style de-speckle + fibrosis/macrophage broadening. Figures:
+[`regressive_pilot_summary.png`](results/figures/regressive_pilot_summary.png),
+[`regressive_pilot_spatialmaps.png`](results/figures/regressive_pilot_spatialmaps.png).
+
+**Bottom line:** H&E gives a real, modest, pathology-specific **necrosis-burden ratio** and a
+**spatial map** now; per-spot localization and full-regression specificity are externally gated
+(whole-slide images; pathology annotation).
+
 ---
 
 ## Results summary
@@ -314,6 +340,8 @@ scripts\run_figures.bat
 | [`wasserstein_decomposition.png`](results/figures/wasserstein_decomposition.png) | W1 location/size/shape decomposition per program × compartment |
 | [`phase_b_composition_negative.png`](results/figures/phase_b_composition_negative.png) | Phase B negative: H&E → compartment composition (LOTO *r*≈0 vs controls) |
 | [`abm_parameters.png`](results/figures/abm_parameters.png) | ABM proliferation multiplier by relapse + per-tumor initial fractions |
+| [`regressive_pilot_summary.png`](results/figures/regressive_pilot_summary.png) | Regressive extension: ratio by treatment + tumor-level H&E→necrosis (r) + per-spot readout |
+| [`regressive_pilot_spatialmaps.png`](results/figures/regressive_pilot_spatialmaps.png) | Regressive extension: spatial maps of regressive (red) vs viable (blue) tissue |
 
 Phase A/B figures regenerate with `08_figures.R` + `python phase2_histology_ml/18_result_figures.py`.
 Segmentation overlays: `data/processed/nuclei/overlays/`
@@ -387,7 +415,7 @@ scripts\rscript.bat -e "testthat::test_dir('tests', filter = 'phase1')"
 sc-wilms-data/
 ├── config/                  # paths.yaml, features.yaml, phase_b.yaml, physicell.yaml
 ├── phase1_mechanotypes/     # R: 00–16 numbered scripts (mechanotype, composition, DE, GSEA, prognostics)
-├── phase2_histology_ml/     # Python: 00–18 numbered scripts (tiles, embeddings, MIL, StarDist, ABM, figures)
+├── phase2_histology_ml/     # Python: 00–25 numbered scripts (tiles, embeddings, MIL, StarDist, ABM, figures; 19–25 = regressive-tissue pilot)
 ├── scripts/                 # ingest, run_phase_*.bat, fetch metadata
 ├── data/raw/                # gitignored ScPCA downloads
 ├── data/processed/          # gitignored intermediates (SCE, scores, tiles, nuclei, embeddings)
