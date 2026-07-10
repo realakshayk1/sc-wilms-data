@@ -91,6 +91,54 @@ def test_rules_half_max_per_tumor_and_fallback():
     assert got["cycle entry|oxygen"] == pytest.approx(12.0)
 
 
+def test_rules_igf2_ecm_gated_by_substrates():
+    """v1.1 IGF2 / ECM rules appear only when those substrates are configured, and layer
+    additively (base 3 rules -> 5 with both)."""
+    mod = _load("03_emit_rules.py")
+    rates = {"proliferation_rate": 0.05, "apoptosis_rate": 0.001, "adhesion_strength": 0.3}
+    base = mod.rules_for("blastemal", rates)
+    assert len(base) == 3                                  # no substrate set -> oxygen/pressure only
+    full = mod.rules_for("blastemal", rates, None, {"IGF2", "ECM"})
+    sigs = {(r["signal"], r["behavior"]) for r in full}
+    assert ("IGF2", "cycle entry") in sigs
+    assert ("ECM", "migration speed") in sigs
+    igf = [r for r in full if r["signal"] == "IGF2"][0]
+    assert igf["response"] == "increases"
+    assert igf["saturation_value"] == pytest.approx(1.5 * 0.05)   # anchored to base proliferation
+    ecm = [r for r in full if r["signal"] == "ECM"][0]
+    assert ecm["response"] == "decreases" and float(ecm["saturation_value"]) == 0.0
+
+
+def test_build_xml_substrates_and_secretion():
+    """04 writes IGF2/ECM microenvironment variables and a per-cell secretion block with an
+    entry per substrate (oxygen + configured extras)."""
+    mod = _load("04_build_model.py")
+    tumor = {"high_grade_regime": False,
+             "cell_types": {c: {"proliferation_rate": 0.05, "apoptosis_rate": 0.001,
+                                "adhesion_strength": 0.3, "migration_speed": 0.4,
+                                "igf_uptake_rate": 0.001, "ecm_secretion_rate":
+                                (0.001 if c == "stromal" else 0.0)}
+                            for c in mod.COMPARTMENTS}}
+    substrates = {"IGF2": {"diffusion": 1000.0, "decay": 0.01, "initial": 1.0,
+                           "boundary": 1.0, "dirichlet": True},
+                  "ECM": {"diffusion": 0.0, "decay": 0.0, "initial": 0.0,
+                          "boundary": 0.0, "dirichlet": False}}
+    root = mod.build_xml("S1", tumor, {"x_max": 500, "y_max": 500},
+                         {"max_time_min": 100, "save_interval_min": 10}, substrates)
+    names = {v.get("name") for v in root.iter("variable")}
+    assert {"oxygen", "IGF2", "ECM"}.issubset(names)
+    # each cell definition has a secretion entry per substrate (oxygen + IGF2 + ECM = 3)
+    for cd in root.iter("cell_definition"):
+        subs = [s.get("name") for s in cd.iter("substrate")]
+        assert subs == ["oxygen", "IGF2", "ECM"]
+    # stromal secretes ECM; tumor cells do not
+    for cd in root.iter("cell_definition"):
+        for s in cd.iter("substrate"):
+            if s.get("name") == "ECM":
+                rate = float(s.find("secretion_rate").text)
+                assert (rate > 0) == (cd.get("name") == "stromal")
+
+
 def test_clustering_index_segregation_vs_mixing():
     v = _load("07_validate.py")
     cats = ["blastemal", "stromal"]

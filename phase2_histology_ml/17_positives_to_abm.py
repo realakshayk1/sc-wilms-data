@@ -21,6 +21,8 @@ Phase C extension (see config/abm_programs.yaml + phase_c.yaml omics_to_params):
     (CDKN1A/B, Hippo, mechano; CCND1/MKI67 neg)   (higher -> brake at lower pressure)
   Hypoxia-tolerance program (HIF1A/VEGFA...)    -> oxygen->necrosis rule HALF-MAX
                                                   (higher tolerance -> necrosis at lower O2)
+  IGF program (IGF2/IGF1R; 11p15 LOI)  [v1.1]  -> per-cell IGF2 substrate UPTAKE_RATE
+                                                  (Wilms analog of the CRPC androgen axis)
 
 Half-maxes are targeted because they dominate ABM QoIs (Johnson et al. Cell 2025, Fig 2E).
 Transforms are transparent and bounded (no fitting): mult = clip(1 +/- k*z, lo, hi) on the
@@ -50,6 +52,7 @@ HIGHGRADE_ADHESION_MULT = 0.80                      # anaplastic regime reduced 
 # optional per-tumor program-score columns (config/abm_programs.yaml); absent -> neutral
 EMT_EPI_COL, EMT_MES_COL = "emt_epithelial_score", "emt_mesenchymal_score"
 CONTACT_COL, HYPOXIA_COL = "contact_inhibition_score", "hypoxia_score"
+IGF_COL = "igf_score"                               # v1.1 IGF2-uptake axis
 
 
 def clip_lin(z, k, lo, hi):
@@ -90,13 +93,17 @@ def main():
     press_k = float(o2p.get("pressure_halfmax_k", 0.30))
     necr_k = float(o2p.get("necrosis_halfmax_k", 0.30))
     hm_lo, hm_hi = o2p.get("halfmax_bounds", [0.5, 1.5])
+    igf_k = float(o2p.get("igf_uptake_k", 0.40))
+    up_lo, up_hi = o2p.get("uptake_bounds", [0.4, 2.5])
 
     # precompute cohort z-scores for the optional program columns (neutral if absent)
     z_epi, z_mes = zscore_col(pt, EMT_EPI_COL), zscore_col(pt, EMT_MES_COL)
     z_contact, z_hypoxia = zscore_col(pt, CONTACT_COL), zscore_col(pt, HYPOXIA_COL)
+    z_igf = zscore_col(pt, IGF_COL)
     has_emt = EMT_EPI_COL in pt.columns or EMT_MES_COL in pt.columns
     has_crowd = CONTACT_COL in pt.columns
     has_hypox = HYPOXIA_COL in pt.columns
+    has_igf = IGF_COL in pt.columns
 
     # Phase B anaplasia probability per tumor (held-out MIL preds); fall back to subdiagnosis
     pred_path = resolve_path(cfg, "results/classifier/phase_b_mil_phikon-v2.predictions.csv")
@@ -111,9 +118,10 @@ def main():
                     "highgrade_prolif_bump": HIGHGRADE_PROLIF_BUMP,
                     "highgrade_adhesion_mult": HIGHGRADE_ADHESION_MULT,
                     "emt_adhesion_k": emt_adh_k, "emt_motility_k": emt_mot_k,
-                    "pressure_halfmax_k": press_k, "necrosis_halfmax_k": necr_k},
+                    "pressure_halfmax_k": press_k, "necrosis_halfmax_k": necr_k,
+                    "igf_uptake_k": igf_k},
         "program_scores_present": {"emt": bool(has_emt), "crowding": bool(has_crowd),
-                                   "hypoxia": bool(has_hypox)},
+                                   "hypoxia": bool(has_hypox), "igf": bool(has_igf)},
         "base_rates": base, "base_half_max": {
             "pressure_cycle": base_pressure_hm, "oxygen_necrosis": base_necrosis_hm,
             "oxygen_cycle": base_cycle_hm}}, "tumors": {}}
@@ -148,6 +156,8 @@ def main():
                                   * float(np.clip(1.0 - press_k * z_contact.loc[i], hm_lo, hm_hi)), 4)
         necrosis_half_max = round(base_necrosis_hm
                                   * float(np.clip(1.0 - necr_k * z_hypoxia.loc[i], hm_lo, hm_hi)), 4)
+        # IGF2 uptake (v1.1): per-tumor IGF program scales each cell's uptake rate
+        igf_uptake_mult = float(np.clip(1.0 + igf_k * z_igf.loc[i], up_lo, up_hi))
 
         cells = {}
         for ct, b in base.items():
@@ -156,6 +166,8 @@ def main():
                 "apoptosis_rate": round(b["apoptosis_rate"] * apop_mult, 6),
                 "adhesion_strength": round(b.get("adhesion_strength", 0.5) * adhesion_mult, 4),
                 "migration_speed": round(b.get("migration_speed", 0.3) * motility_mult, 4),
+                "igf_uptake_rate": round(b.get("igf_uptake_rate", 0.001) * igf_uptake_mult, 6),
+                "ecm_secretion_rate": round(b.get("ecm_secretion_rate", 0.0), 6),
             }
             if "ecm_stiffness" in b:
                 cells[ct]["ecm_stiffness"] = b["ecm_stiffness"]
@@ -169,6 +181,7 @@ def main():
                      "proliferation_mult": prolif_mult, "apoptosis_mult": apop_mult,
                      "emt_index_z": round(emt_index, 3), "adhesion_mult": round(adhesion_mult, 3),
                      "motility_mult": round(motility_mult, 3),
+                     "igf_uptake_mult": round(igf_uptake_mult, 3),
                      "pressure_half_max": pressure_half_max, "necrosis_half_max": necrosis_half_max,
                      "high_grade": high_grade,
                      "anaplasia_prob": None if pd.isna(p_anap) else round(float(p_anap), 3),
@@ -180,8 +193,8 @@ def main():
     tab.to_csv(out_dir / "per_tumor_abm_params.csv", index=False)
     print(f"[ok] {len(rows)} tumors mapped -> {out_dir/'positives_to_physicell.yaml'}")
     print(f"[ok] table -> {out_dir/'per_tumor_abm_params.csv'}")
-    print(f"[info] program scores present: emt={has_emt} crowding={has_crowd} hypoxia={has_hypox}"
-          f"  (absent -> neutral)")
+    print(f"[info] program scores present: emt={has_emt} crowding={has_crowd} "
+          f"hypoxia={has_hypox} igf={has_igf}  (absent -> neutral)")
     # quick sanity: do high-grade / relapse tumors get higher proliferation multipliers?
     if "relapse" in tab and tab["relapse"].notna().any():
         rel = tab.dropna(subset=["relapse"])

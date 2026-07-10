@@ -11,22 +11,30 @@ cell_types:
   # migration_speed (um/min) base priors follow the EMT prior: blastemal (mesenchymal-like
   # small-round-blue-cell) is most motile, epithelial (tubular) least, stromal mid. The
   # per-tumor EMT score scales these reciprocally with adhesion in 17_positives_to_abm.py.
+  # igf_uptake_rate (1/min): tumor cells consume IGF2 (per-tumor IGF-score scaled in 17);
+  # ecm_secretion_rate (1/min): only stromal cells build ECM (v1.1 substrates).
   blastemal:
     proliferation_rate: 0.05
     adhesion_strength: 0.3
     apoptosis_rate: 0.001
     migration_speed: 0.5
+    igf_uptake_rate: 0.001
+    ecm_secretion_rate: 0.0
   epithelial:
     proliferation_rate: 0.01
     adhesion_strength: 0.8
     apoptosis_rate: 0.002
     migration_speed: 0.1
+    igf_uptake_rate: 0.001
+    ecm_secretion_rate: 0.0
   stromal:
     proliferation_rate: 0.005
     adhesion_strength: 0.5
     apoptosis_rate: 0.001
     ecm_stiffness: 1.5
     migration_speed: 0.25
+    igf_uptake_rate: 0.0005
+    ecm_secretion_rate: 0.001
 
 fraction_to_parameter:
   blastemal:

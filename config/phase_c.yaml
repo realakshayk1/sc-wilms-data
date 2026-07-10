@@ -74,3 +74,26 @@ omics_to_params:
   pressure_halfmax_k: 0.30      # higher contact-inhibition -> brake engages at lower pressure
   necrosis_halfmax_k: 0.30      # higher hypoxia tolerance -> necrosis at lower O2
   halfmax_bounds: [0.5, 1.5]
+  # v1.1 substrate-uptake axis: per-cell IGF2 uptake = base * clip(1 + k*z_igf, lo, hi)
+  igf_uptake_k: 0.40            # +1 SD IGF program -> ~1.4x IGF2 uptake (11p15 LOI Wilms driver)
+  uptake_bounds: [0.4, 2.5]
+
+# v1.1 BioFVM substrates beyond oxygen (04_build_model.py writes microenvironment + per-cell
+# secretion; 03_emit_rules.py adds IGF2->cycle-entry and ECM->migration rules).
+#   IGF2 — diffusible growth factor; the Wilms analog of the CRPC androgen-uptake axis. Tumor
+#          cells take it up (rate from the IGF program); local depletion couples clones.
+#   ECM  — near-static matrix secreted by stromal cells; dense ECM impedes motility (the
+#          Johnson et al. 2025 PDAC "fibroblast barrier" effect, monotonic form for v1.1).
+substrates:
+  IGF2:
+    diffusion: 1000.0           # um^2/min (small secreted peptide)
+    decay: 0.01                 # 1/min
+    initial: 1.0                # dimensionless concentration
+    boundary: 1.0               # Dirichlet at domain edge = systemic supply
+    dirichlet: true
+  ECM:
+    diffusion: 0.0              # matrix does not diffuse
+    decay: 0.0
+    initial: 0.0                # accumulates where stroma secretes it
+    boundary: 0.0
+    dirichlet: false

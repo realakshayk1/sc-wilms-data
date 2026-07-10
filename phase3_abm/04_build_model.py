@@ -31,8 +31,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from abm_utils import COMPARTMENTS, ensure_dir, load_config, resolve_path, setup_logging  # noqa: E402
 
-# BioFVM oxygen defaults (um^2/min diffusion, 1/min decay, mmHg boundary)
-O2_DIFFUSION, O2_DECAY, O2_DIRICHLET = 1.0e5, 0.1, 38.0
+# BioFVM oxygen defaults (um^2/min diffusion, 1/min decay, mmHg boundary, uptake 1/min)
+O2_DIFFUSION, O2_DECAY, O2_DIRICHLET, O2_UPTAKE = 1.0e5, 0.1, 38.0, 0.1
 
 
 def _sub(parent, tag, text=None, **attrib):
@@ -42,7 +42,25 @@ def _sub(parent, tag, text=None, **attrib):
     return el
 
 
-def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
+def _secretion_block(ph, rates, substrates):
+    """Per-cell secretion/uptake for every substrate. Oxygen is consumed (gradient former);
+    IGF2 uptake is per-tumor (IGF program); ECM is secreted by stromal cells (v1.1)."""
+    sec = _sub(ph, "secretion")
+    def one(name, secretion_rate, uptake_rate, target=1.0):
+        s = _sub(sec, "substrate", name=name)
+        _sub(s, "secretion_rate", secretion_rate, units="1/min")
+        _sub(s, "secretion_target", target, units="substrate density")
+        _sub(s, "uptake_rate", uptake_rate, units="1/min")
+        _sub(s, "net_export_rate", 0.0, units="total substrate/min")
+    one("oxygen", 0.0, O2_UPTAKE)
+    if "IGF2" in substrates:
+        one("IGF2", 0.0, rates.get("igf_uptake_rate", 0.001))
+    if "ECM" in substrates:
+        one("ECM", rates.get("ecm_secretion_rate", 0.0), 0.0)
+
+
+def build_xml(sample_id, tumor, dom, sim, substrates=None) -> ET.Element:
+    substrates = substrates or {}
     root = ET.Element("PhysiCell_settings", version="devel-metadata")
 
     d = _sub(root, "domain")
@@ -68,6 +86,16 @@ def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
     _sub(pd_, "decay_rate", O2_DECAY, units="1/min")
     _sub(o2, "initial_condition", O2_DIRICHLET, units="mmHg")
     bc = _sub(o2, "Dirichlet_boundary_condition", O2_DIRICHLET, units="mmHg", enabled="true")  # noqa: F841
+
+    # v1.1 substrates (IGF2, ECM) from config, IDs after oxygen
+    for j, (name, spec) in enumerate(substrates.items(), start=1):
+        v = _sub(me, "variable", name=name, units="dimensionless", ID=str(j))
+        ps = _sub(v, "physical_parameter_set")
+        _sub(ps, "diffusion_coefficient", spec.get("diffusion", 0.0), units="micron^2/min")
+        _sub(ps, "decay_rate", spec.get("decay", 0.0), units="1/min")
+        _sub(v, "initial_condition", spec.get("initial", 0.0), units="dimensionless")
+        _sub(v, "Dirichlet_boundary_condition", spec.get("boundary", 0.0),
+             units="dimensionless", enabled="true" if spec.get("dirichlet") else "false")
 
     defs = _sub(root, "cell_definitions")
     for i, ct in enumerate(COMPARTMENTS):
@@ -95,6 +123,7 @@ def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
         mot_opt = _sub(mot, "options")
         _sub(mot_opt, "enabled", "true")
         _sub(mot_opt, "use_2D", "true")
+        _secretion_block(ph, rates, substrates)
 
     rules = _sub(root, "cell_rules")
     rs = _sub(rules, "rulesets")
@@ -122,6 +151,7 @@ def main() -> None:
     setup_logging()
     cfg = load_config()
     sim = cfg["phase_c"]["simulation"]
+    substrates = cfg["phase_c"].get("substrates", {})
     margin = float(cfg["phase_c"]["domain"]["margin_um"])
     abm = yaml.safe_load(resolve_path(cfg, "results/abm/positives_to_physicell.yaml").read_text())
     out_dir = resolve_path(cfg, "results/abm")
@@ -138,7 +168,7 @@ def main() -> None:
         cells = pd.read_csv(cells_csv)
         dom = {"x_max": round(cells["x"].max() + margin, 1),
                "y_max": round(cells["y"].max() + margin, 1)}
-        root = build_xml(sid, tumor, dom, sim)
+        root = build_xml(sid, tumor, dom, sim, substrates)
         xml = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
         (d / "PhysiCell_settings.xml").write_text(xml)
         prov = {"sample_id": sid, "seed": cfg["phase_c"]["seed"],

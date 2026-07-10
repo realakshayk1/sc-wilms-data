@@ -16,7 +16,7 @@ grammar-enabled PhysiCell (≥1.14.1).
 | 1 | `01_spot_density.py` | `results/abm/{spot,tumor}_density.csv` — StarDist nuclei/spot (diagnostic; see note) |
 | 2 | `02_place_agents.py` | `cells.csv` — agents at Visium coords (µm), identities from deconvolution |
 | 3 | `03_emit_rules.py` | `rules.csv` (+ `rules_annotated.csv`) — grammar; oxygen-necrosis + pressure half-maxes are **per-tumor** (hypoxia / crowding programs) |
-| 4 | `04_build_model.py` | `PhysiCell_settings.xml` + `provenance.json` — domain + oxygen + cell defs (incl. per-tumor motility) |
+| 4 | `04_build_model.py` | `PhysiCell_settings.xml` + `provenance.json` — domain + oxygen/IGF2/ECM substrates + cell defs (per-tumor motility + secretion) |
 
 Downstream: `05_uq.py` sensitivity sweep, `06_run_cohort.sh` SLURM array (cluster),
 `07_validate.py` emergent (patient-level growth/invasion) + spatial QoIs.
@@ -35,13 +35,20 @@ in `config/abm_programs.yaml`:
 | EMT (epithelial vs mesenchymal) | `adhesion_strength` + `migration_speed` (reciprocal) | mesenchymal ↑ → adhesion ↓, motility ↑ |
 | Contact-inhibition (crowding) | `pressure→cycle-entry` **half-max** | higher → brake at lower pressure |
 | Hypoxia tolerance | `oxygen→necrosis` **half-max** | higher → necrosis at lower O₂ |
+| IGF (IGF2/IGF1R; 11p15 LOI) **[v1.1]** | per-cell **IGF2 uptake_rate** | higher → more IGF2 consumed |
 
 Half-maxes are the omics-determined knob because they dominate ABM QoIs (Johnson et al.,
 *Cell* 2025, Fig 2E), unlike base-rate perturbations. Bounds/slopes live in
-`config/phase_c.yaml → omics_to_params`. IGF2 uptake + ECM→motility land in v1.1 (see the
-internal plan). New geometry QoIs in `07_validate.py`: **clustering index** (homotypic
-self-segregation) and **invasiveness** (radial projections, per the *Cell* 2025 STAR Methods),
-computed on the initial `cells.csv` now as the t0 baseline.
+`config/phase_c.yaml → omics_to_params`. New geometry QoIs in `07_validate.py`: **clustering
+index** (homotypic self-segregation) and **invasiveness** (radial projections, per the *Cell*
+2025 STAR Methods), computed on the initial `cells.csv` now as the t0 baseline.
+
+**v1.1 substrates** (`config/phase_c.yaml → substrates`; `04_build_model.py` writes the
+BioFVM fields + per-cell secretion): **IGF2** — a diffusible growth factor (the Wilms analog of
+the CRPC androgen-uptake axis; tumor cells consume it at the IGF-scaled rate, coupling clones
+through local depletion) with an `IGF2→cycle-entry` rule; **ECM** — a near-static matrix
+secreted by stromal cells, with an `ECM→migration-speed` (decrease) rule encoding the Johnson
+et al. fibroblast-barrier effect. Oxygen now has a per-cell uptake so hypoxic gradients form.
 
 ## Spatial validation QoIs (`07_validate.py`)
 

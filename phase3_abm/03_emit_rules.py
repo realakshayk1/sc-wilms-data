@@ -33,14 +33,18 @@ HEADER = ["cell_type", "signal", "response", "behavior",
 DEFAULT_HM = {"oxygen_cycle": 10.0, "oxygen_necrosis": 5.0, "pressure_cycle": 1.0}
 
 
-def rules_for(cell_type: str, rates: dict, half_max: dict | None = None) -> list[dict]:
+def rules_for(cell_type: str, rates: dict, half_max: dict | None = None,
+              substrates: set | None = None) -> list[dict]:
     """Grammar rows for one (tumor, cell_type). Saturation anchored to base rates; the
     oxygen-necrosis and pressure half-maxes are PER-TUMOR (hypoxia / contact-inhibition
     programs, via 17_positives_to_abm.py). Half-max is where ABM sensitivity concentrates
-    (Johnson et al. Cell 2025, Fig 2E), so it is the omics-determined knob."""
+    (Johnson et al. Cell 2025, Fig 2E), so it is the omics-determined knob. IGF2 / ECM rules
+    are added only when those v1.1 substrates are configured; they layer additively onto the
+    same behaviours via PhysiCell's multi-rule bilinear law."""
     prolif = float(rates["proliferation_rate"])
     hm = {**DEFAULT_HM, **(half_max or {})}
-    return [
+    substrates = substrates or set()
+    rows = [
         # oxygen increases cycle entry (proliferation up to ~1.5x base at high pO2)
         dict(cell_type=cell_type, signal="oxygen", response="increases",
              behavior="cycle entry", saturation_value=round(1.5 * prolif, 6),
@@ -57,6 +61,19 @@ def rules_for(cell_type: str, rates: dict, half_max: dict | None = None) -> list
              half_max=round(float(hm["pressure_cycle"]), 4), hill_power=4, apply_to_dead=0,
              text=f"In {cell_type}, pressure decreases cycle entry"),
     ]
+    if "IGF2" in substrates:
+        # IGF2 increases cycle entry (Wilms growth-factor uptake axis; 11p15 LOI)
+        rows.append(dict(cell_type=cell_type, signal="IGF2", response="increases",
+                         behavior="cycle entry", saturation_value=round(1.5 * prolif, 6),
+                         half_max=0.5, hill_power=4, apply_to_dead=0,
+                         text=f"In {cell_type}, IGF2 increases cycle entry"))
+    if "ECM" in substrates:
+        # dense ECM decreases migration speed (Johnson et al. 2025 fibroblast-barrier effect)
+        rows.append(dict(cell_type=cell_type, signal="ECM", response="decreases",
+                         behavior="migration speed", saturation_value=0.0,
+                         half_max=0.5, hill_power=4, apply_to_dead=0,
+                         text=f"In {cell_type}, ECM decreases migration speed"))
+    return rows
 
 
 def main() -> None:
@@ -67,6 +84,7 @@ def main() -> None:
         raise FileNotFoundError(f"run 17_positives_to_abm.py first: {yml}")
     abm = yaml.safe_load(yml.read_text())
     out_dir = ensure_dir(resolve_path(cfg, "results/abm"))
+    substrates = set(cfg["phase_c"].get("substrates", {}))   # v1.1 IGF2 / ECM if configured
 
     n = 0
     for sid, tumor in abm.get("tumors", {}).items():
@@ -76,7 +94,7 @@ def main() -> None:
             rates = tumor["cell_types"].get(ct)
             if rates is None:
                 continue
-            rows.extend(rules_for(ct, rates, half_max))
+            rows.extend(rules_for(ct, rates, half_max, substrates))
         if not rows:
             continue
         df = pd.DataFrame(rows)
