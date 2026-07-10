@@ -74,8 +74,49 @@ main <- function() {
                     col, sum(!is.na(pt[[col]])), nrow(pt)))
   }
 
+  # --- compartment-resolved scores (cell x tumor type; addresses ABM direction 2b) -------
+  # Same signed-logCPM score but on per-(sample x compartment) pseudobulk, z-scored WITHIN
+  # each compartment across samples. Emits <program>_score__<compartment> columns so the ABM
+  # can give e.g. blastemal vs epithelial cells compartment-specific EMT/crowding/hypoxia.
+  MIN_CELLS_GRP <- 20L
+  COMPARTMENTS <- c("blastemal", "epithelial", "stromal")
+  dat <- readRDS(resolve_path(cfg, cfg$paths$phase_a$scores_rds))
+  cs <- as.character(dat$meta$cell_state)
+  sid <- as.character(proc$meta$sample_id)
+  if (length(cs) == ncol(counts) && length(sid) == ncol(counts)) {
+    grp <- paste(sid, cs, sep = "||")
+    lcpm_g <- logcpm_sample(counts, grp)
+    gsize <- table(grp)
+    score_grp <- function(pos, neg) {               # raw signed score per group column
+      pid <- intersect(names(id2sym)[id2sym %in% pos], rownames(lcpm_g))
+      if (length(pid) < MIN_POS_GENES) return(NULL)
+      s <- colMeans(lcpm_g[pid, , drop = FALSE])
+      nid <- if (length(neg)) intersect(names(id2sym)[id2sym %in% neg], rownames(lcpm_g)) else character(0)
+      if (length(nid) >= 1) s <- s - colMeans(lcpm_g[nid, , drop = FALSE])
+      s
+    }
+    n_comp <- 0
+    for (pg in programs) {
+      sc <- score_grp(unlist(pg$genes_positive), unlist(pg$genes_negative))
+      if (is.null(sc)) next
+      for (comp in COMPARTMENTS) {
+        cols <- grep(paste0("\\|\\|", comp, "$"), names(sc), value = TRUE)
+        if (!length(cols)) next
+        v <- sc[cols]
+        v[as.integer(gsize[cols]) < MIN_CELLS_GRP] <- NA        # drop tiny pseudobulk groups
+        z <- as.numeric(scale(v))                               # z within compartment
+        names(z) <- sub(paste0("\\|\\|", comp, "$"), "", cols)  # -> sample ids
+        pt[[paste0(pg$id, "_score__", comp)]] <- z[as.character(pt$sample_id)]
+        n_comp <- n_comp + 1
+      }
+    }
+    message(sprintf("[ok]   compartment-resolved: %d <program>x<compartment> score columns", n_comp))
+  } else {
+    message("[warn] cell_state not aligned to counts; skipped compartment-resolved scores")
+  }
+
   write.csv(pt, pt_path, row.names = FALSE)
-  message(sprintf("[ok] per_tumor_scores.csv augmented with %d program score(s): %s",
+  message(sprintf("[ok] per_tumor_scores.csv augmented with %d tumor-level program score(s): %s",
                   length(added), paste(added, collapse = ", ")))
   message("[next] re-run phase2_histology_ml/17_positives_to_abm.py to activate the axes.")
 }

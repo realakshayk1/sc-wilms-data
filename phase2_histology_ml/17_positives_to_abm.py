@@ -105,6 +105,16 @@ def main():
     has_hypox = HYPOXIA_COL in pt.columns
     has_igf = IGF_COL in pt.columns
 
+    # F5: compartment-resolved EMT (cell x tumor type). Each compartment uses its own
+    # <program>_score__<compartment> column when present (17_abm_program_scores.R), else the
+    # tumor-level column. So blastemal / epithelial / stromal cells get distinct adhesion+
+    # motility from compartment-specific DE, not one shared tumor value.
+    def _z_ct(base_col, tumor_series):
+        return {ct: (zscore_col(pt, f"{base_col}__{ct}") if f"{base_col}__{ct}" in pt.columns
+                     else tumor_series) for ct in base}
+    z_epi_ct, z_mes_ct = _z_ct(EMT_EPI_COL, z_epi), _z_ct(EMT_MES_COL, z_mes)
+    emt_resolved = any(f"{EMT_MES_COL}__{ct}" in pt.columns for ct in base)
+
     # Phase B anaplasia probability per tumor (held-out MIL preds); fall back to subdiagnosis
     pred_path = resolve_path(cfg, "results/classifier/phase_b_mil_phikon-v2.predictions.csv")
     anap_prob = {}
@@ -122,6 +132,7 @@ def main():
                     "igf_uptake_k": igf_k},
         "program_scores_present": {"emt": bool(has_emt), "crowding": bool(has_crowd),
                                    "hypoxia": bool(has_hypox), "igf": bool(has_igf)},
+        "emt_compartment_resolved": bool(emt_resolved),
         "base_rates": base, "base_half_max": {
             "pressure_cycle": base_pressure_hm, "oxygen_necrosis": base_necrosis_hm,
             "oxygen_cycle": base_cycle_hm}}, "tumors": {}}
@@ -161,11 +172,16 @@ def main():
 
         cells = {}
         for ct, b in base.items():
+            # compartment-specific EMT -> this cell type's adhesion + motility
+            emt_ct = float(z_mes_ct[ct].loc[i] - z_epi_ct[ct].loc[i])
+            adh_ct = ((HIGHGRADE_ADHESION_MULT if high_grade else 1.0)
+                      * float(np.clip(1.0 - emt_adh_k * emt_ct, adh_lo, adh_hi)))
+            mot_ct = float(np.clip(1.0 + emt_mot_k * emt_ct, mot_lo, mot_hi))
             cells[ct] = {
                 "proliferation_rate": round(b["proliferation_rate"] * prolif_mult * prolif_extra, 6),
                 "apoptosis_rate": round(b["apoptosis_rate"] * apop_mult, 6),
-                "adhesion_strength": round(b.get("adhesion_strength", 0.5) * adhesion_mult, 4),
-                "migration_speed": round(b.get("migration_speed", 0.3) * motility_mult, 4),
+                "adhesion_strength": round(b.get("adhesion_strength", 0.5) * adh_ct, 4),
+                "migration_speed": round(b.get("migration_speed", 0.3) * mot_ct, 4),
                 "igf_uptake_rate": round(b.get("igf_uptake_rate", 0.001) * igf_uptake_mult, 6),
                 "ecm_secretion_rate": round(b.get("ecm_secretion_rate", 0.0), 6),
             }

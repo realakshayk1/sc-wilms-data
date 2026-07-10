@@ -109,6 +109,30 @@ prior, deconvolution backend, domain, simulation). Base cell rates come from
 `config/physicell.yaml`; per-tumor scaling comes from
 `results/abm/positives_to_physicell.yaml` (emitted by `phase2_histology_ml/17_positives_to_abm.py`).
 
+## Scope & honest limitations
+
+- **Intrinsic side is the grammar paradigm, not an MHS signaling model.** The CRPC lab's
+  "intrinsic" is a mechanistic AR/PI3K/p53 ODE-Boolean network whose species are set by DEGs.
+  Phase C instead uses **reduced-form** rate multipliers from program scores + Johnson-grammar
+  environmental rules. Cell↔environment coupling *is* present (oxygen/IGF2/pressure/ECM
+  dynamically modulate each cell), but there is no intracellular network computing fate. A
+  Wilms signaling model would be a separate (v3) effort.
+- **Compartment-resolved DE (cell × tumor type).** EMT adhesion/motility is now set
+  per-compartment from `<program>_score__<compartment>` (17_abm_program_scores.R), so
+  blastemal / epithelial / stromal cells differ within a tumor; crowding/hypoxia half-maxes
+  remain tumor-level.
+- **Uncalibrated priors → relative, not absolute.** Base rates, half-maxes, k-slopes,
+  diffusion/uptake constants are literature/biophysical priors (no fitting). Read outputs as
+  **relative contrasts** (favorable vs anaplastic), not absolute predictions; the `05_uq.py`
+  sweep quantifies sensitivity to every uncertain knob.
+- **mRNA ≠ pathway activity.** YAP/TAZ and PI3K are set post-translationally, so the crowding
+  half-max rests partly on weak proxies — trust the cell-cycle effectors (CCND1/MKI67/CDKN1x)
+  in the `contact_inhibition` program.
+- **Histology → positions is deferred (WSI-gated).** Agents are placed from Visium spot
+  coordinates + deconvolution (omics positions); sub-spot placement from StarDist nucleus
+  centroids and necrotic-territory seeding from the regressive map are scaffolded but off until
+  whole-slide-resolution segmentation exists (the documented Visium-hires nuclei ceiling).
+
 ## Design notes
 
 - **Coordinates.** Full-res pixel spot centres → microns via the Visium

@@ -73,6 +73,7 @@ uq:
     pressure_half_max: 1.0        # rules: pressure -> cycle entry half-max [per-tumor: contact-inhibition score]
     adhesion_strength: 0.4        # mechanics base (overridden per tumor if present)
     migration_speed: 0.3          # mechanics base (per-tumor EMT-scaled; um/min)
+    igf_uptake_rate: 0.001        # v1.1 IGF2 uptake base (per-tumor IGF-scaled; 1/min)
     proliferation_saturation: 1.0 # multiplier on rule saturation values
 
 # Per-tumor determination of base rates + rule half-maxes from omics program scores
