@@ -1,5 +1,11 @@
-# PhysiCell parameter mapping from H&E-derived spot fractions.
-# One representative tumor run — not a cohort sweep.
+# PhysiCell base phenotype rates (per-tumor scaled in 17_positives_to_abm.py).
+# UNITS: proliferation_rate / apoptosis_rate are PhysiCell transition rates in 1/min, so a
+# rate r ~ a mean event time of 1/r minutes. Values are set to realistic cell-cycle / death
+# times (NOT the earlier placeholders, which implied a ~20 min cell cycle):
+#   blastemal  prolif 7.0e-4/min ~= 24 h cycle (Wilms blastema is highly proliferative)
+#   epithelial 3.0e-4/min ~= 56 h   stromal 2.0e-4/min ~= 83 h (differentiated, slow)
+#   apoptosis  1e-5..2e-5/min (baseline death is rare; the p53/relapse axis raises it)
+# The program multipliers (<=2.5x prolif, <=2x apop) and the high-grade bump ride on top.
 seed: 42
 domain:
   x_max_um: 500
@@ -8,19 +14,33 @@ domain:
   dy_um: 20
 
 cell_types:
+  # migration_speed (um/min) base priors follow the EMT prior: blastemal (mesenchymal-like
+  # small-round-blue-cell) is most motile, epithelial (tubular) least, stromal mid. The
+  # per-tumor EMT score scales these reciprocally with adhesion in 17_positives_to_abm.py.
+  # igf_uptake_rate (1/min): tumor cells consume IGF2 (per-tumor IGF-score scaled in 17);
+  # ecm_secretion_rate (1/min): only stromal cells build ECM (v1.1 substrates).
   blastemal:
-    proliferation_rate: 0.05
+    proliferation_rate: 0.0007        # ~24 h cycle
     adhesion_strength: 0.3
-    apoptosis_rate: 0.001
+    apoptosis_rate: 0.00002
+    migration_speed: 0.5
+    igf_uptake_rate: 0.001
+    ecm_secretion_rate: 0.0
   epithelial:
-    proliferation_rate: 0.01
+    proliferation_rate: 0.0003        # ~56 h cycle
     adhesion_strength: 0.8
-    apoptosis_rate: 0.002
+    apoptosis_rate: 0.00002
+    migration_speed: 0.1
+    igf_uptake_rate: 0.001
+    ecm_secretion_rate: 0.0
   stromal:
-    proliferation_rate: 0.005
+    proliferation_rate: 0.0002        # ~83 h cycle
     adhesion_strength: 0.5
-    apoptosis_rate: 0.001
+    apoptosis_rate: 0.00001
     ecm_stiffness: 1.5
+    migration_speed: 0.25
+    igf_uptake_rate: 0.0005
+    ecm_secretion_rate: 0.001
 
 fraction_to_parameter:
   blastemal:

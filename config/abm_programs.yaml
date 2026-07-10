@@ -1,0 +1,54 @@
+# Extrinsic-axis gene programs for ABM parameterization (Phase C).
+#
+# SEPARATE from config/features.yaml on purpose: features.yaml is the FROZEN Phase A
+# Wasserstein feature list ("do not add/drop features"). These programs instead feed the
+# omics -> PhysiCell parameter mapping (phase2_histology_ml/17_positives_to_abm.py):
+# a per-tumor z-scored score for each program shifts a base rate or a rule half-max.
+#
+# Producer: a per-tumor aggregation (phase1 R side, e.g. 16_prognostic_association.R, or a
+# CPU/Visium scorer) writes columns "<id>_score" into results/mechanotypes/per_tumor_scores.csv.
+# Until those columns exist, 17_positives_to_abm.py falls back to NEUTRAL (multiplier 1.0,
+# base half-max) — so the pipeline runs today and "lights up" when the scores land.
+#
+# Panels transferred from the CRPC MHS<->ABM crowding/adhesion/uptake axes (mapped to Wilms).
+
+programs:
+  # --- Adhesion / motility axis (EMT) -> adhesion_strength + migration_speed (reciprocal) ---
+  - id: emt_epithelial
+    axis: adhesion_motility
+    description: Epithelial-retention program (high -> more adhesion, less motility)
+    genes_positive: [CDH1, EPCAM, KRT8, KRT18]
+    genes_negative: [VIM, CDH2, SNAI1]
+  - id: emt_mesenchymal
+    axis: adhesion_motility
+    description: Mesenchymal / EMT program (high -> less adhesion, more motility)
+    genes_positive: [VIM, CDH2, SNAI1, ZEB1, RHOA, ITGB1, FN1]
+    genes_negative: [CDH1, EPCAM]
+
+  # --- Crowding / mechanotransduction axis -> pressure->cycle-entry half-max ---
+  # The six CRPC panels collapse here: cell-cycle effectors (trustworthy) + the sensing
+  # regulators (Hippo/YAP-TAZ, mechanosensitive) that jointly set crowding sensitivity.
+  - id: contact_inhibition
+    axis: crowding
+    description: >-
+      Contact-inhibition sensing/effector program; high -> stronger crowding brake
+      (lower pressure half-max). Trust the cell-cycle effectors; Hippo/mechano are weak
+      mRNA proxies for activity (documented caveat).
+    genes_positive: [CDKN1A, CDKN1B, LATS1, LATS2, YAP1, WWTR1, PIEZO1]
+    genes_negative: [CCND1, MKI67]
+
+  # --- Hypoxia axis -> oxygen->necrosis half-max (tolerance) ---
+  - id: hypoxia
+    axis: crowding
+    description: Hypoxia-tolerance program; high -> survives lower O2 (lower necrosis half-max).
+    genes_positive: [HIF1A, VEGFA, EPAS1, CA9, SLC2A1]
+    genes_negative: []
+
+  # --- Substrate uptake axis (v1.1, needs IGF2 substrate) -> per-cell uptake_rate ---
+  - id: igf
+    axis: uptake
+    description: >-
+      IGF signalling / receptor program (11p15 LOI is the canonical Wilms driver);
+      high -> higher IGF2 uptake_rate. Wired in v1.1 with the IGF2 substrate.
+    genes_positive: [IGF2, IGF1R, IGF2BP1, IGF2BP3]
+    genes_negative: []

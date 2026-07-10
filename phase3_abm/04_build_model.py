@@ -31,8 +31,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from abm_utils import COMPARTMENTS, ensure_dir, load_config, resolve_path, setup_logging  # noqa: E402
 
-# BioFVM oxygen defaults (um^2/min diffusion, 1/min decay, mmHg boundary)
-O2_DIFFUSION, O2_DECAY, O2_DIRICHLET = 1.0e5, 0.1, 38.0
+# BioFVM oxygen defaults (um^2/min diffusion, 1/min decay, mmHg boundary, uptake 1/min)
+O2_DIFFUSION, O2_DECAY, O2_DIRICHLET, O2_UPTAKE = 1.0e5, 0.1, 38.0, 0.1
 
 
 def _sub(parent, tag, text=None, **attrib):
@@ -42,7 +42,26 @@ def _sub(parent, tag, text=None, **attrib):
     return el
 
 
-def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
+def _secretion_block(ph, rates, substrates, o2_uptake=O2_UPTAKE):
+    """Per-cell secretion/uptake for every substrate. Oxygen is consumed (gradient former);
+    IGF2 uptake is per-tumor (IGF program); ECM is secreted by stromal cells (v1.1). Necrotic
+    tissue passes zero rates (dead cells neither consume nor secrete)."""
+    sec = _sub(ph, "secretion")
+    def one(name, secretion_rate, uptake_rate, target=1.0):
+        s = _sub(sec, "substrate", name=name)
+        _sub(s, "secretion_rate", secretion_rate, units="1/min")
+        _sub(s, "secretion_target", target, units="substrate density")
+        _sub(s, "uptake_rate", uptake_rate, units="1/min")
+        _sub(s, "net_export_rate", 0.0, units="total substrate/min")
+    one("oxygen", 0.0, o2_uptake)
+    if "IGF2" in substrates:
+        one("IGF2", 0.0, rates.get("igf_uptake_rate", 0.001))
+    if "ECM" in substrates:
+        one("ECM", rates.get("ecm_secretion_rate", 0.0), 0.0)
+
+
+def build_xml(sample_id, tumor, dom, sim, substrates=None, include_necrotic=False) -> ET.Element:
+    substrates = substrates or {}
     root = ET.Element("PhysiCell_settings", version="devel-metadata")
 
     d = _sub(root, "domain")
@@ -69,6 +88,16 @@ def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
     _sub(o2, "initial_condition", O2_DIRICHLET, units="mmHg")
     bc = _sub(o2, "Dirichlet_boundary_condition", O2_DIRICHLET, units="mmHg", enabled="true")  # noqa: F841
 
+    # v1.1 substrates (IGF2, ECM) from config, IDs after oxygen
+    for j, (name, spec) in enumerate(substrates.items(), start=1):
+        v = _sub(me, "variable", name=name, units="dimensionless", ID=str(j))
+        ps = _sub(v, "physical_parameter_set")
+        _sub(ps, "diffusion_coefficient", spec.get("diffusion", 0.0), units="micron^2/min")
+        _sub(ps, "decay_rate", spec.get("decay", 0.0), units="1/min")
+        _sub(v, "initial_condition", spec.get("initial", 0.0), units="dimensionless")
+        _sub(v, "Dirichlet_boundary_condition", spec.get("boundary", 0.0),
+             units="dimensionless", enabled="true" if spec.get("dirichlet") else "false")
+
     defs = _sub(root, "cell_definitions")
     for i, ct in enumerate(COMPARTMENTS):
         rates = tumor["cell_types"][ct]
@@ -87,6 +116,37 @@ def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
         _sub(mech, "cell_cell_adhesion_strength", rates.get("adhesion_strength", 0.4),
              units="micron/min")
         _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
+        # motility: per-tumor migration speed (EMT-scaled in 17_positives_to_abm.py)
+        mot = _sub(ph, "motility")
+        _sub(mot, "speed", rates.get("migration_speed", 0.3), units="micron/min")
+        _sub(mot, "persistence_time", 1.0, units="min")
+        _sub(mot, "migration_bias", 0.5, units="dimensionless")
+        mot_opt = _sub(mot, "options")
+        _sub(mot_opt, "enabled", "true")
+        _sub(mot_opt, "use_2D", "true")
+        _secretion_block(ph, rates, substrates)
+
+    if include_necrotic:
+        # inert necrotic tissue (seeded at high-mito spots): no cycle/death/motility/uptake —
+        # a space-filling dead-tissue scaffold, gets no grammar rules.
+        cd = _sub(defs, "cell_definition", name="necrotic", ID=str(len(COMPARTMENTS)))
+        ph = _sub(cd, "phenotype")
+        cyc = _sub(ph, "cycle", model="live", code="6")
+        _sub(_sub(cyc, "phase_transition_rates", units="1/min"), "rate", 0.0,
+             start_index="0", end_index="0", fixed_duration="false")
+        death = _sub(ph, "death")
+        _sub(_sub(death, "model", name="apoptosis", code="100"), "death_rate", 0.0, units="1/min")
+        _sub(_sub(death, "model", name="necrosis", code="101"), "death_rate", 0.0, units="1/min")
+        mech = _sub(ph, "mechanics")
+        _sub(mech, "cell_cell_adhesion_strength", 0.1, units="micron/min")
+        _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
+        mot = _sub(ph, "motility")
+        _sub(mot, "speed", 0.0, units="micron/min")
+        _sub(mot, "persistence_time", 1.0, units="min")
+        _sub(mot, "migration_bias", 0.0, units="dimensionless")
+        mo = _sub(mot, "options"); _sub(mo, "enabled", "false"); _sub(mo, "use_2D", "true")
+        _secretion_block(ph, {"igf_uptake_rate": 0.0, "ecm_secretion_rate": 0.0},
+                         substrates, o2_uptake=0.0)     # dead: no uptake/secretion
 
     rules = _sub(root, "cell_rules")
     rs = _sub(rules, "rulesets")
@@ -114,43 +174,62 @@ def main() -> None:
     setup_logging()
     cfg = load_config()
     sim = cfg["phase_c"]["simulation"]
+    substrates = cfg["phase_c"].get("substrates", {})
+    include_necrotic = bool(cfg["phase_c"].get("necrotic", {}).get("enabled"))
     margin = float(cfg["phase_c"]["domain"]["margin_um"])
     abm = yaml.safe_load(resolve_path(cfg, "results/abm/positives_to_physicell.yaml").read_text())
     out_dir = resolve_path(cfg, "results/abm")
 
-    samples = args.sample or list(abm.get("tumors", {}))
+    # model units: (run_id, sample_id). Patch mode -> one per (tumor, patch) from the
+    # patch manifest; whole-slide -> one per tumor. Rules/params are per tumor (shared by
+    # a tumor's patches); each run dir gets its own copy of rules.csv for PhysiCell.
+    pm_path = out_dir / "patch_manifest.csv"
+    if pm_path.exists():
+        pm = pd.read_csv(pm_path)
+        if args.sample:
+            pm = pm[pm["sample_id"].isin(args.sample)]
+        units = list(zip(pm["run_id"], pm["sample_id"]))
+    else:
+        samples = args.sample or list(abm.get("tumors", {}))
+        units = [(s, s) for s in samples]
+
     built = []
-    for sid in samples:
+    for run_id, sid in units:
         tumor = abm["tumors"].get(sid)
-        d = out_dir / sid
-        cells_csv = d / "cells.csv"
-        if tumor is None or not cells_csv.exists() or not (d / "rules.csv").exists():
-            print(f"[skip] {sid}: missing tumor params / cells.csv / rules.csv")
+        run_d = ensure_dir(out_dir / run_id)
+        cells_csv = run_d / "cells.csv"
+        rules_src = out_dir / sid / "rules.csv"          # written per tumor by Stage 3
+        if tumor is None or not cells_csv.exists() or not rules_src.exists():
+            print(f"[skip] {run_id}: missing tumor params / cells.csv / rules.csv")
             continue
+        if run_d != rules_src.parent:                    # patch dir needs its own rules.csv
+            (run_d / "rules.csv").write_text(rules_src.read_text())
         cells = pd.read_csv(cells_csv)
         dom = {"x_max": round(cells["x"].max() + margin, 1),
                "y_max": round(cells["y"].max() + margin, 1)}
-        root = build_xml(sid, tumor, dom, sim)
+        root = build_xml(run_id, tumor, dom, sim, substrates, include_necrotic)
         xml = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
-        (d / "PhysiCell_settings.xml").write_text(xml)
-        prov = {"sample_id": sid, "seed": cfg["phase_c"]["seed"],
+        (run_d / "PhysiCell_settings.xml").write_text(xml)
+        prov = {"run_id": run_id, "sample_id": sid, "seed": cfg["phase_c"]["seed"],
                 "n_agents": int(len(cells)), "domain_um": dom,
                 "high_grade_regime": bool(tumor.get("high_grade_regime", False)),
                 "deconvolution_backend": cfg["phase_c"]["deconvolution"]["backend"],
                 "density_source": cfg["phase_c"]["density"]["source"],
+                "patch_mode": pm_path.exists(),
                 "sources": {
                     "params": "results/abm/positives_to_physicell.yaml",
                     "coords": "Visium tissue_positions_list.csv",
                     "density": "nucleus_features_stardist_80_pt40.parquet"},
                 "physicell_target": ">=1.14.1 (grammar-enabled)"}
-        (d / "provenance.json").write_text(json.dumps(prov, indent=2))
-        built.append(sid)
-        print(f"[ok] {sid}: model dir -> {d}")
+        (run_d / "provenance.json").write_text(json.dumps(prov, indent=2))
+        built.append(run_id)
+        print(f"[ok] {run_id}: model dir -> {run_d}")
 
     if built:
         (out_dir / "model_manifest.json").write_text(
-            json.dumps({"tumors": built, "n": len(built)}, indent=2))
-        print(f"[ok] {len(built)} model dirs; manifest -> {out_dir/'model_manifest.json'}")
+            json.dumps({"runs": built, "n": len(built)}, indent=2))
+        (out_dir / "model_manifest.txt").write_text("\n".join(built) + "\n")   # 06_run_cohort
+        print(f"[ok] {len(built)} model dirs; manifest -> model_manifest.{{json,txt}}")
 
 
 if __name__ == "__main__":

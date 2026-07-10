@@ -28,6 +28,27 @@ deconvolution:
   backend: program_softmax        # program_softmax | nnls | cell2location
   frac_cols: [deconv_blastemal, deconv_epithelial, deconv_stromal]
 
+# Representative FOV patch sampling (02_place_agents.py). Simulating the whole ~6 mm slide
+# is ~1e5 agents/tumor; the CRPC-lab methodology runs small data-initialised tissues instead.
+# Sampling a few compositionally-diverse windows per tumor cuts per-run cost ~100x with no
+# cost to the tumor-level QoIs (which are patch-scale anyway). Each patch -> its own model dir
+# results/abm/<sample_id>__p<k>/. Set enabled:false for the whole-slide run.
+patch:
+  enabled: true
+  size_um: 700.0                  # FOV window edge (~7 spot pitches); ~a few hundred agents
+  n_patches: 3                    # windows per tumor (spanning its composition range)
+  min_spots: 8                    # a window needs >= this many in-tissue spots to qualify
+
+# Necrotic-territory seeding (02_place_agents.py). Spots with anomalously high mitochondrial
+# fraction (the necrosis readout validated in the regressive pilot, scripts 19-25) are seeded
+# as inert necrotic tissue instead of viable compartments, so the ABM starts with the tumor's
+# real necrosis geography rather than growing it purely from the O2 solver. Cohort-relative
+# z-threshold on pct_mito (data/processed/spot_qc_necrosis.parquet). enabled:false to skip.
+necrotic:
+  enabled: true
+  source: pct_mito                # column in spot_qc_necrosis.parquet
+  z_threshold: 1.5                # spot flagged necrotic if cohort z(pct_mito) exceeds this
+
 domain:
   margin_um: 100.0                # padding around the tumor bounding box
   z_um: 0.0                       # 2-D monolayer for v1
@@ -45,17 +66,59 @@ spatial_qoi:
 
 simulation:
   max_time_min: 4320              # 3 days
-  save_interval_min: 60
-  replicates: 20                  # per tumor (cluster)
+  save_interval_min: 360          # 6 h: ~13 frames for the growth census + endpoint (was 60)
+  replicates: 10                  # per run (cluster); matches the CRPC paper's 10 (was 20)
 
 # One-at-a-time sensitivity analysis (perturb each uncertain parameter by +/- pct).
 # Base values are the defaults used by Stages 3-4; the cluster wrapper applies the
 # per-run override to rules.csv / PhysiCell_settings.xml.
 uq:
   pct_levels: [1, 5, 10, 20]      # symmetric +/- perturbations, percent
+  # Sweep only representative runs, not the whole cohort (49 runs/run x 100+ patches is a
+  # trap). Empty -> 05_uq.py picks a few representatives; override with --sample / --all.
+  n_representative: 3
   params:
     oxygen_cycle_half_max: 10.0   # rules: oxygen -> cycle entry half-max (mmHg)
-    oxygen_necrosis_half_max: 5.0 # rules: oxygen -> necrosis half-max (mmHg)
-    pressure_half_max: 1.0        # rules: pressure -> cycle entry half-max
+    oxygen_necrosis_half_max: 5.0 # rules: oxygen -> necrosis half-max (mmHg) [per-tumor: hypoxia score]
+    pressure_half_max: 1.0        # rules: pressure -> cycle entry half-max [per-tumor: contact-inhibition score]
     adhesion_strength: 0.4        # mechanics base (overridden per tumor if present)
+    migration_speed: 0.3          # mechanics base (per-tumor EMT-scaled; um/min)
+    igf_uptake_rate: 0.001        # v1.1 IGF2 uptake base (per-tumor IGF-scaled; 1/min)
     proliferation_saturation: 1.0 # multiplier on rule saturation values
+
+# Per-tumor determination of base rates + rule half-maxes from omics program scores
+# (phase2_histology_ml/17_positives_to_abm.py). Transparent, bounded, no fitting. Absent
+# score columns -> neutral (multiplier 1.0 / base half-max). See config/abm_programs.yaml.
+omics_to_params:
+  # base-rate multipliers: value = base * clip(1 + k*z, lo, hi) on the per-tumor program z-score
+  emt_adhesion_k: 0.25          # +1 SD mesenchymal EMT index -> ~0.75x adhesion (reciprocal below)
+  emt_motility_k: 0.40          # +1 SD mesenchymal EMT index -> ~1.4x migration speed
+  adhesion_bounds: [0.4, 1.6]
+  motility_bounds: [0.4, 2.0]
+  # rule half-max shifts: half_max = base * clip(1 - k*z, lo, hi); higher program -> lower half-max
+  pressure_halfmax_k: 0.30      # higher contact-inhibition -> brake engages at lower pressure
+  necrosis_halfmax_k: 0.30      # higher hypoxia tolerance -> necrosis at lower O2
+  halfmax_bounds: [0.5, 1.5]
+  # v1.1 substrate-uptake axis: per-cell IGF2 uptake = base * clip(1 + k*z_igf, lo, hi)
+  igf_uptake_k: 0.40            # +1 SD IGF program -> ~1.4x IGF2 uptake (11p15 LOI Wilms driver)
+  uptake_bounds: [0.4, 2.5]
+
+# v1.1 BioFVM substrates beyond oxygen (04_build_model.py writes microenvironment + per-cell
+# secretion; 03_emit_rules.py adds IGF2->cycle-entry and ECM->migration rules).
+#   IGF2 — diffusible growth factor; the Wilms analog of the CRPC androgen-uptake axis. Tumor
+#          cells take it up (rate from the IGF program); local depletion couples clones.
+#   ECM  — near-static matrix secreted by stromal cells; dense ECM impedes motility (the
+#          Johnson et al. 2025 PDAC "fibroblast barrier" effect, monotonic form for v1.1).
+substrates:
+  IGF2:
+    diffusion: 1000.0           # um^2/min (small secreted peptide)
+    decay: 0.01                 # 1/min
+    initial: 1.0                # dimensionless concentration
+    boundary: 1.0               # Dirichlet at domain edge = systemic supply
+    dirichlet: true
+  ECM:
+    diffusion: 0.0              # matrix does not diffuse
+    decay: 0.0
+    initial: 0.0                # accumulates where stroma secretes it
+    boundary: 0.0
+    dirichlet: false

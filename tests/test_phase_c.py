@@ -74,6 +74,177 @@ def test_rules_schema():
     assert ox["saturation_value"] == pytest.approx(1.5 * 0.05)
 
 
+def test_rules_half_max_per_tumor_and_fallback():
+    """The oxygen-necrosis and pressure half-maxes come from the per-tumor `half_max` block
+    (17_positives_to_abm.py); absent -> documented defaults."""
+    mod = _load("03_emit_rules.py")
+    rates = {"proliferation_rate": 0.05, "apoptosis_rate": 0.001, "adhesion_strength": 0.3}
+    # fallback (no half_max) uses DEFAULT_HM
+    base = {r["behavior"] + "|" + r["signal"]: r["half_max"] for r in mod.rules_for("blastemal", rates)}
+    assert base["necrosis|oxygen"] == pytest.approx(mod.DEFAULT_HM["oxygen_necrosis"])
+    assert base["cycle entry|pressure"] == pytest.approx(mod.DEFAULT_HM["pressure_cycle"])
+    # per-tumor override flows into the emitted rows
+    hm = {"oxygen_cycle": 12.0, "oxygen_necrosis": 3.5, "pressure_cycle": 0.7}
+    got = {r["behavior"] + "|" + r["signal"]: r["half_max"] for r in mod.rules_for("blastemal", rates, hm)}
+    assert got["necrosis|oxygen"] == pytest.approx(3.5)
+    assert got["cycle entry|pressure"] == pytest.approx(0.7)
+    assert got["cycle entry|oxygen"] == pytest.approx(12.0)
+
+
+def test_rules_igf2_ecm_gated_by_substrates():
+    """v1.1 IGF2 / ECM rules appear only when those substrates are configured, and layer
+    additively (base 3 rules -> 5 with both)."""
+    mod = _load("03_emit_rules.py")
+    rates = {"proliferation_rate": 0.05, "apoptosis_rate": 0.001, "adhesion_strength": 0.3}
+    base = mod.rules_for("blastemal", rates)
+    assert len(base) == 3                                  # no substrate set -> oxygen/pressure only
+    full = mod.rules_for("blastemal", rates, None, {"IGF2", "ECM"})
+    sigs = {(r["signal"], r["behavior"]) for r in full}
+    assert ("IGF2", "cycle entry") in sigs
+    assert ("ECM", "migration speed") in sigs
+    igf = [r for r in full if r["signal"] == "IGF2"][0]
+    assert igf["response"] == "increases"
+    assert igf["saturation_value"] == pytest.approx(1.5 * 0.05)   # anchored to base proliferation
+    ecm = [r for r in full if r["signal"] == "ECM"][0]
+    assert ecm["response"] == "decreases" and float(ecm["saturation_value"]) == 0.0
+
+
+def test_build_xml_substrates_and_secretion():
+    """04 writes IGF2/ECM microenvironment variables and a per-cell secretion block with an
+    entry per substrate (oxygen + configured extras)."""
+    mod = _load("04_build_model.py")
+    tumor = {"high_grade_regime": False,
+             "cell_types": {c: {"proliferation_rate": 0.05, "apoptosis_rate": 0.001,
+                                "adhesion_strength": 0.3, "migration_speed": 0.4,
+                                "igf_uptake_rate": 0.001, "ecm_secretion_rate":
+                                (0.001 if c == "stromal" else 0.0)}
+                            for c in mod.COMPARTMENTS}}
+    substrates = {"IGF2": {"diffusion": 1000.0, "decay": 0.01, "initial": 1.0,
+                           "boundary": 1.0, "dirichlet": True},
+                  "ECM": {"diffusion": 0.0, "decay": 0.0, "initial": 0.0,
+                          "boundary": 0.0, "dirichlet": False}}
+    root = mod.build_xml("S1", tumor, {"x_max": 500, "y_max": 500},
+                         {"max_time_min": 100, "save_interval_min": 10}, substrates)
+    names = {v.get("name") for v in root.iter("variable")}
+    assert {"oxygen", "IGF2", "ECM"}.issubset(names)
+    # each cell definition has a secretion entry per substrate (oxygen + IGF2 + ECM = 3)
+    for cd in root.iter("cell_definition"):
+        subs = [s.get("name") for s in cd.iter("substrate")]
+        assert subs == ["oxygen", "IGF2", "ECM"]
+    # stromal secretes ECM; tumor cells do not
+    for cd in root.iter("cell_definition"):
+        for s in cd.iter("substrate"):
+            if s.get("name") == "ECM":
+                rate = float(s.find("secretion_rate").text)
+                assert (rate > 0) == (cd.get("name") == "stromal")
+
+
+def test_clustering_index_segregation_vs_mixing():
+    v = _load("07_validate.py")
+    cats = ["blastemal", "stromal"]
+    # two separated homotypic blocks -> clustering index > 1 for each type
+    left = np.column_stack([np.zeros(40), np.linspace(0, 40, 40)])
+    right = np.column_stack([np.full(40, 100.0), np.linspace(0, 40, 40)])
+    seg = v.clustering_index(np.vstack([left, right]),
+                             np.array(["blastemal"] * 40 + ["stromal"] * 40), cats, k=4)
+    assert (seg["clustering_index"] > 1.2).all()
+    # interleaved checkerboard -> index near 1 (well mixed)
+    xs, ys = np.meshgrid(np.arange(10), np.arange(10))
+    coords = np.column_stack([xs.ravel(), ys.ravel()]).astype(float)
+    lab = np.where((coords[:, 0].astype(int) + coords[:, 1].astype(int)) % 2 == 0,
+                   "blastemal", "stromal")
+    mix = v.clustering_index(coords, lab, cats, k=4)
+    assert (mix["clustering_index"] < 1.05).all()
+
+
+def test_radial_invasiveness_reacts_to_outliers():
+    """Against a FIXED reference radius (as the sim uses the t0 median at later timepoints),
+    a compact mass has no projections beyond it; adding far spokes creates invasive ones."""
+    v = _load("07_validate.py")
+    rng = np.random.default_rng(0)
+    disc = rng.normal(0, 3, (200, 2))                     # p95 radius ~ 7 um
+    ref = 15.0                                            # fixed reference the disc never reaches
+    compact = v.radial_invasiveness(disc, reference_radius=ref)
+    assert compact["n_invasive_projections"] == 0
+    assert compact["invasive_fraction"] == 0.0
+    spokes = np.array([[80.0, 0.0], [-80.0, 0.0], [0.0, 80.0], [0.0, -80.0]])
+    invasive = v.radial_invasiveness(np.vstack([disc, spokes]), reference_radius=ref)
+    assert invasive["n_invasive_projections"] >= 4        # the four spokes' sectors
+    assert invasive["invasive_fraction"] > 0.0
+    assert invasive["radial_p95_over_ref"] > compact["radial_p95_over_ref"]
+
+
+def test_zscore_col_optional_and_neutral():
+    import pandas as pd
+    import importlib.util as _il
+    path = ROOT / "phase2_histology_ml" / "17_positives_to_abm.py"
+    sys.path.insert(0, str(ROOT / "phase2_histology_ml"))
+    spec = _il.spec_from_file_location("positives_to_abm", path)
+    try:
+        mod = _il.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:  # pragma: no cover
+        pytest.skip(f"cannot import 17_positives_to_abm: {e}")
+    df = pd.DataFrame({"present": [1.0, 2.0, 3.0, 4.0]})
+    # absent column -> all zeros (neutral)
+    assert (mod.zscore_col(df, "missing") == 0.0).all()
+    # present column -> proper z-score (mean 0, unit population std)
+    z = mod.zscore_col(df, "present")
+    assert z.mean() == pytest.approx(0.0, abs=1e-9)
+    assert z.std(ddof=0) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_select_patches_diverse_and_deterministic():
+    place = _load("02_place_agents.py")
+    import pandas as pd
+    # four spatially separated tiles, each a distinct composition
+    comps = [(0.8, 0.1, 0.1), (0.1, 0.8, 0.1), (0.1, 0.1, 0.8), (0.34, 0.33, 0.33)]
+    centres = [(0, 0), (2000, 0), (0, 2000), (2000, 2000)]
+    rows = []
+    for (cx, cy), (a, b, c) in zip(centres, comps):
+        for j in range(10):
+            rows.append({"x_um": cx + j, "y_um": cy + (j % 3),
+                         "_p_blastemal": a, "_p_epithelial": b, "_p_stromal": c})
+    s = pd.DataFrame(rows)
+    masks = place.select_patches(s, size_um=500.0, n_patches=2, min_spots=5)
+    assert len(masks) == 2
+    assert all(len(m) == 10 for m in masks)                  # whole tiles, min_spots honoured
+    again = place.select_patches(s, size_um=500.0, n_patches=2, min_spots=5)
+    assert [m.tolist() for m in masks] == [m.tolist() for m in again]   # deterministic
+    # the two chosen tiles are compositionally distinct (diversity objective)
+    import numpy as np
+    means = [s.iloc[m][["_p_blastemal", "_p_epithelial", "_p_stromal"]].mean().to_numpy()
+             for m in masks]
+    assert np.linalg.norm(means[0] - means[1]) > 0.3
+    # min_spots filter: nothing qualifies when the threshold exceeds tile size
+    assert place.select_patches(s, size_um=500.0, n_patches=2, min_spots=99) == []
+
+
+def test_necrotic_spot_places_inert_necrotic_agents():
+    """A spot flagged necrotic (_nec=True) seeds inert 'necrotic' agents; a viable spot seeds
+    its compartment. Uses the real config so density/spot geometry resolve."""
+    au = _load("abm_utils.py")
+    place = _load("02_place_agents.py")
+    import pandas as pd
+    cfg = au.load_config()
+    s = pd.DataFrame([
+        {"spot_id": "A", "x_um": 0.0, "y_um": 0.0, "_p_blastemal": 1.0,
+         "_p_epithelial": 0.0, "_p_stromal": 0.0, "_nec": True},
+        {"spot_id": "B", "x_um": 200.0, "y_um": 0.0, "_p_blastemal": 1.0,
+         "_p_epithelial": 0.0, "_p_stromal": 0.0, "_nec": False},
+    ])
+    cells = place._place_from_spots(cfg, s, au.rng_for(42, "t"))
+    assert (cells.cell_type == place.NECROTIC).sum() > 0      # necrotic spot -> necrotic agents
+    assert (cells.cell_type == "blastemal").sum() > 0         # viable spot -> compartment
+    assert set(cells.cell_type) <= {place.NECROTIC, "blastemal"}
+
+
+def test_sample_of_run_id():
+    v = _load("07_validate.py")
+    assert v.sample_of("SCPCS000168__p2") == "SCPCS000168"
+    assert v.sample_of("SCPCS000168") == "SCPCS000168"    # whole-slide run id unchanged
+
+
 def test_placement_smoke_if_data_present():
     """Deterministic, in-bounds placement with fractions summing to 1 — real data only."""
     au = _load("abm_utils.py")
