@@ -29,6 +29,8 @@
 set -euo pipefail
 
 : "${PHYSICELL_BIN:?set PHYSICELL_BIN to the compiled PhysiCell project binary}"
+# compute nodes are fresh shells: load the gcc whose libstdc++ the binary needs (Bridges-2)
+module load gcc/13.3.1-p20240614 2>/dev/null || module load gcc 2>/dev/null || true
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"     # PhysiCell is OpenMP; match the cores
 REPLICATES="${REPLICATES:-10}"
 ROOT="$(git rev-parse --show-toplevel)"

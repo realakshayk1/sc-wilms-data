@@ -16,6 +16,9 @@
 set -euo pipefail
 
 : "${PHYSICELL_BIN:?set PHYSICELL_BIN to the compiled PhysiCell project binary}"
+# runtime libstdc++ must match the gcc the binary was built with (Bridges-2). Harmless if
+# already loaded in the shell (its LD_LIBRARY_PATH is inherited); guarded so it never aborts.
+module load gcc/13.3.1-p20240614 2>/dev/null || module load gcc 2>/dev/null || true
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 ROOT="$(git rev-parse --show-toplevel)"
 ABM="$ROOT/results/abm"
