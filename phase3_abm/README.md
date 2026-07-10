@@ -14,7 +14,7 @@ grammar-enabled PhysiCell (≥1.14.1).
 | Stage | Script | Output (per tumor, `results/abm/<sample_id>/`) |
 |---|---|---|
 | 1 | `01_spot_density.py` | `results/abm/{spot,tumor}_density.csv` — StarDist nuclei/spot (diagnostic; see note) |
-| 2 | `02_place_agents.py` | `cells.csv` — agents at Visium coords (µm), identities from deconvolution |
+| 2 | `02_place_agents.py` | `cells.csv` — agents at Visium coords (µm), identities from deconvolution; **patch mode** emits one dir per (tumor, FOV patch) |
 | 3 | `03_emit_rules.py` | `rules.csv` (+ `rules_annotated.csv`) — grammar; oxygen-necrosis + pressure half-maxes are **per-tumor** (hypoxia / crowding programs) |
 | 4 | `04_build_model.py` | `PhysiCell_settings.xml` + `provenance.json` — domain + oxygen/IGF2/ECM substrates + cell defs (per-tumor motility + secretion) |
 
@@ -71,6 +71,28 @@ full-resolution spots; the in-house path stays the fast default.
 Observed baseline (real Visium): blastemal↔epithelial **co-locate** at short range
 (enrichment z ≈ +2.5; near-range co-occurrence ≈ 1.3), stromal **segregates** from both
 (z ≈ −8; co-occurrence < 1) — the nephrogenic transition vs the stromal compartment.
+
+## Compute scale — representative FOV patches
+
+Simulating the whole ~6 mm slide is ~70k agents / ~80k voxels **per tumor** — hours per run
+and ~1 TB of output over the cohort. The CRPC-lab methodology instead runs small
+data-initialised tissues, so `02_place_agents.py` defaults to **patch mode**
+(`config/phase_c.yaml → patch`): a few compositionally-diverse ~700 µm windows per tumor
+(~1.5k agents, ~2k voxels each), one model dir per `(tumor, patch)`. Patches of a tumor share
+its parameters and are aggregated to the patient in `07_validate.py` (the unit of inference).
+
+| | whole-slide | patch (default) |
+|---|---|---|
+| agents / run | ~70k | **~1.5k** (48× less) |
+| voxels / run | ~80k | **~2.1k** (38× less) |
+| cohort runs | 41 × 20 = 820 | 111 × 10 = 1,110 |
+| est. core-hours (SU) | ~13k–79k | **~0.7k–1.8k** |
+| output | ~1 TB | **~7 GB** |
+| replicates | 20 | 10 (matches the CRPC paper) |
+| UQ | all tumors (~2k runs) | representative (`05_uq.py`, ~150 runs) |
+
+Set `patch.enabled: false` for the full whole-slide run. Absolute per-run wallclock still
+needs one timed calibration run on the cluster, but the agent/voxel reductions are structural.
 
 ## Run
 

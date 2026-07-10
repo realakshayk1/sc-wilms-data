@@ -194,6 +194,38 @@ def test_zscore_col_optional_and_neutral():
     assert z.std(ddof=0) == pytest.approx(1.0, abs=1e-9)
 
 
+def test_select_patches_diverse_and_deterministic():
+    place = _load("02_place_agents.py")
+    import pandas as pd
+    # four spatially separated tiles, each a distinct composition
+    comps = [(0.8, 0.1, 0.1), (0.1, 0.8, 0.1), (0.1, 0.1, 0.8), (0.34, 0.33, 0.33)]
+    centres = [(0, 0), (2000, 0), (0, 2000), (2000, 2000)]
+    rows = []
+    for (cx, cy), (a, b, c) in zip(centres, comps):
+        for j in range(10):
+            rows.append({"x_um": cx + j, "y_um": cy + (j % 3),
+                         "_p_blastemal": a, "_p_epithelial": b, "_p_stromal": c})
+    s = pd.DataFrame(rows)
+    masks = place.select_patches(s, size_um=500.0, n_patches=2, min_spots=5)
+    assert len(masks) == 2
+    assert all(len(m) == 10 for m in masks)                  # whole tiles, min_spots honoured
+    again = place.select_patches(s, size_um=500.0, n_patches=2, min_spots=5)
+    assert [m.tolist() for m in masks] == [m.tolist() for m in again]   # deterministic
+    # the two chosen tiles are compositionally distinct (diversity objective)
+    import numpy as np
+    means = [s.iloc[m][["_p_blastemal", "_p_epithelial", "_p_stromal"]].mean().to_numpy()
+             for m in masks]
+    assert np.linalg.norm(means[0] - means[1]) > 0.3
+    # min_spots filter: nothing qualifies when the threshold exceeds tile size
+    assert place.select_patches(s, size_um=500.0, n_patches=2, min_spots=99) == []
+
+
+def test_sample_of_run_id():
+    v = _load("07_validate.py")
+    assert v.sample_of("SCPCS000168__p2") == "SCPCS000168"
+    assert v.sample_of("SCPCS000168") == "SCPCS000168"    # whole-slide run id unchanged
+
+
 def test_placement_smoke_if_data_present():
     """Deterministic, in-bounds placement with fractions summing to 1 — real data only."""
     au = _load("abm_utils.py")

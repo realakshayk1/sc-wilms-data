@@ -42,9 +42,24 @@ def generate_sweep(sample_id: str, base_values: dict[str, float],
     return pd.DataFrame(rows)
 
 
+def representative_samples(tumors: dict, n: int) -> list[str]:
+    """A few tumors spanning the high-grade axis (deterministic), so a sensitivity sweep
+    covers both regimes without running the whole cohort (the ~49-runs-each trap)."""
+    hi = sorted(s for s, t in tumors.items() if t.get("high_grade_regime"))
+    lo = sorted(s for s, t in tumors.items() if not t.get("high_grade_regime"))
+    picks, i = [], 0
+    while len(picks) < n and (hi or lo):
+        pool = (lo, hi)[i % 2] or (hi, lo)[i % 2]
+        if pool:
+            picks.append(pool.pop(0))
+        i += 1
+    return picks
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sample", nargs="*", default=None)
+    ap.add_argument("--sample", nargs="*", default=None, help="explicit sample_id(s)")
+    ap.add_argument("--all", action="store_true", help="sweep every tumor (expensive)")
     args = ap.parse_args()
 
     setup_logging()
@@ -56,7 +71,14 @@ def main() -> None:
 
     abm = yaml.safe_load(
         resolve_path(cfg, "results/abm/positives_to_physicell.yaml").read_text())
-    samples = args.sample or list(abm.get("tumors", {}))
+    tumors = abm.get("tumors", {})
+    if args.sample:
+        samples = args.sample
+    elif args.all:
+        samples = list(tumors)
+    else:
+        samples = representative_samples(tumors, int(uq.get("n_representative", 3)))
+        print(f"[info] representative UQ on {samples} (use --all to sweep every tumor)")
 
     total = 0
     for sid in samples:

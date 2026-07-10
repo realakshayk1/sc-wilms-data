@@ -156,39 +156,56 @@ def main() -> None:
     abm = yaml.safe_load(resolve_path(cfg, "results/abm/positives_to_physicell.yaml").read_text())
     out_dir = resolve_path(cfg, "results/abm")
 
-    samples = args.sample or list(abm.get("tumors", {}))
+    # model units: (run_id, sample_id). Patch mode -> one per (tumor, patch) from the
+    # patch manifest; whole-slide -> one per tumor. Rules/params are per tumor (shared by
+    # a tumor's patches); each run dir gets its own copy of rules.csv for PhysiCell.
+    pm_path = out_dir / "patch_manifest.csv"
+    if pm_path.exists():
+        pm = pd.read_csv(pm_path)
+        if args.sample:
+            pm = pm[pm["sample_id"].isin(args.sample)]
+        units = list(zip(pm["run_id"], pm["sample_id"]))
+    else:
+        samples = args.sample or list(abm.get("tumors", {}))
+        units = [(s, s) for s in samples]
+
     built = []
-    for sid in samples:
+    for run_id, sid in units:
         tumor = abm["tumors"].get(sid)
-        d = out_dir / sid
-        cells_csv = d / "cells.csv"
-        if tumor is None or not cells_csv.exists() or not (d / "rules.csv").exists():
-            print(f"[skip] {sid}: missing tumor params / cells.csv / rules.csv")
+        run_d = ensure_dir(out_dir / run_id)
+        cells_csv = run_d / "cells.csv"
+        rules_src = out_dir / sid / "rules.csv"          # written per tumor by Stage 3
+        if tumor is None or not cells_csv.exists() or not rules_src.exists():
+            print(f"[skip] {run_id}: missing tumor params / cells.csv / rules.csv")
             continue
+        if run_d != rules_src.parent:                    # patch dir needs its own rules.csv
+            (run_d / "rules.csv").write_text(rules_src.read_text())
         cells = pd.read_csv(cells_csv)
         dom = {"x_max": round(cells["x"].max() + margin, 1),
                "y_max": round(cells["y"].max() + margin, 1)}
-        root = build_xml(sid, tumor, dom, sim, substrates)
+        root = build_xml(run_id, tumor, dom, sim, substrates)
         xml = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
-        (d / "PhysiCell_settings.xml").write_text(xml)
-        prov = {"sample_id": sid, "seed": cfg["phase_c"]["seed"],
+        (run_d / "PhysiCell_settings.xml").write_text(xml)
+        prov = {"run_id": run_id, "sample_id": sid, "seed": cfg["phase_c"]["seed"],
                 "n_agents": int(len(cells)), "domain_um": dom,
                 "high_grade_regime": bool(tumor.get("high_grade_regime", False)),
                 "deconvolution_backend": cfg["phase_c"]["deconvolution"]["backend"],
                 "density_source": cfg["phase_c"]["density"]["source"],
+                "patch_mode": pm_path.exists(),
                 "sources": {
                     "params": "results/abm/positives_to_physicell.yaml",
                     "coords": "Visium tissue_positions_list.csv",
                     "density": "nucleus_features_stardist_80_pt40.parquet"},
                 "physicell_target": ">=1.14.1 (grammar-enabled)"}
-        (d / "provenance.json").write_text(json.dumps(prov, indent=2))
-        built.append(sid)
-        print(f"[ok] {sid}: model dir -> {d}")
+        (run_d / "provenance.json").write_text(json.dumps(prov, indent=2))
+        built.append(run_id)
+        print(f"[ok] {run_id}: model dir -> {run_d}")
 
     if built:
         (out_dir / "model_manifest.json").write_text(
-            json.dumps({"tumors": built, "n": len(built)}, indent=2))
-        print(f"[ok] {len(built)} model dirs; manifest -> {out_dir/'model_manifest.json'}")
+            json.dumps({"runs": built, "n": len(built)}, indent=2))
+        (out_dir / "model_manifest.txt").write_text("\n".join(built) + "\n")   # 06_run_cohort
+        print(f"[ok] {len(built)} model dirs; manifest -> model_manifest.{{json,txt}}")
 
 
 if __name__ == "__main__":

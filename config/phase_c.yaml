@@ -28,6 +28,17 @@ deconvolution:
   backend: program_softmax        # program_softmax | nnls | cell2location
   frac_cols: [deconv_blastemal, deconv_epithelial, deconv_stromal]
 
+# Representative FOV patch sampling (02_place_agents.py). Simulating the whole ~6 mm slide
+# is ~1e5 agents/tumor; the CRPC-lab methodology runs small data-initialised tissues instead.
+# Sampling a few compositionally-diverse windows per tumor cuts per-run cost ~100x with no
+# cost to the tumor-level QoIs (which are patch-scale anyway). Each patch -> its own model dir
+# results/abm/<sample_id>__p<k>/. Set enabled:false for the whole-slide run.
+patch:
+  enabled: true
+  size_um: 700.0                  # FOV window edge (~7 spot pitches); ~a few hundred agents
+  n_patches: 3                    # windows per tumor (spanning its composition range)
+  min_spots: 8                    # a window needs >= this many in-tissue spots to qualify
+
 domain:
   margin_um: 100.0                # padding around the tumor bounding box
   z_um: 0.0                       # 2-D monolayer for v1
@@ -45,14 +56,17 @@ spatial_qoi:
 
 simulation:
   max_time_min: 4320              # 3 days
-  save_interval_min: 60
-  replicates: 20                  # per tumor (cluster)
+  save_interval_min: 360          # 6 h: ~13 frames for the growth census + endpoint (was 60)
+  replicates: 10                  # per run (cluster); matches the CRPC paper's 10 (was 20)
 
 # One-at-a-time sensitivity analysis (perturb each uncertain parameter by +/- pct).
 # Base values are the defaults used by Stages 3-4; the cluster wrapper applies the
 # per-run override to rules.csv / PhysiCell_settings.xml.
 uq:
   pct_levels: [1, 5, 10, 20]      # symmetric +/- perturbations, percent
+  # Sweep only representative runs, not the whole cohort (49 runs/run x 100+ patches is a
+  # trap). Empty -> 05_uq.py picks a few representatives; override with --sample / --all.
+  n_representative: 3
   params:
     oxygen_cycle_half_max: 10.0   # rules: oxygen -> cycle entry half-max (mmHg)
     oxygen_necrosis_half_max: 5.0 # rules: oxygen -> necrosis half-max (mmHg) [per-tumor: hypoxia score]

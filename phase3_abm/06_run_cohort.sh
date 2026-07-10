@@ -16,15 +16,18 @@
 #   results/abm/<sample_id>/uq/sweep_manifest.csv        (optional UQ)
 #   results/abm/model_manifest.txt                        (one sample_id per line)
 #
+# Patch-scale models (~1e3 agents, ~2e3 voxels) are small: 4 cores / 2 h / 8 GB is ample.
+# NOTE: array size = n_runs * REPLICATES may exceed the scheduler MaxArraySize (often 1001);
+# chunk with several `sbatch --array=A-B` submissions if so.
 #SBATCH --job-name=wilms_abm
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=16G
-#SBATCH --time=08:00:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=02:00:00
 #SBATCH --output=results/abm/logs/%A_%a.out
 set -euo pipefail
 
 : "${PHYSICELL_BIN:?set PHYSICELL_BIN to the compiled PhysiCell project binary}"
-REPLICATES="${REPLICATES:-20}"
+REPLICATES="${REPLICATES:-10}"
 ROOT="$(git rev-parse --show-toplevel)"
 MANIFEST="$ROOT/results/abm/model_manifest.txt"
 

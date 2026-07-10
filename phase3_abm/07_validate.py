@@ -188,24 +188,42 @@ def radial_invasiveness(coords: np.ndarray, reference_radius: float | None = Non
             "radial_p95_over_ref": round(float(np.percentile(d, 95) / ref), 3) if ref > 0 else np.nan}
 
 
-def initial_condition_qoi(cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Clustering index + invasiveness on each tumor's initial cells.csv. This is the t0
-    baseline the simulated endpoints are later compared against (per-tumor, patient-level)."""
+def sample_of(run_id: str) -> str:
+    """Map a run id to its tumor (patch runs are '<sample_id>__p<k>')."""
+    return run_id.split("__p")[0]
+
+
+def run_dirs(cfg):
+    """Model run dirs: from model_manifest.txt when present (avoids double-counting stale
+    whole-slide dirs alongside patch dirs), else glob."""
     out_dir = resolve_path(cfg, "results/abm")
+    mf = out_dir / "model_manifest.txt"
+    if mf.exists():
+        return [out_dir / r for r in mf.read_text().split() if r]
+    return sorted(p.parent for p in out_dir.glob("SCPCS*/cells.csv"))
+
+
+def initial_condition_qoi(cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Clustering index + invasiveness on each run's initial cells.csv. This is the t0
+    baseline the simulated endpoints are later compared against. run_id + sample_id are both
+    kept so patches can be aggregated to the patient (the unit of inference)."""
     knn = int(cfg["phase_c"]["spatial_qoi"]["knn"])
     clust, inv = [], []
-    for cells_csv in sorted(out_dir.glob("SCPCS*/cells.csv")):
-        sid = cells_csv.parent.name
+    for d in run_dirs(cfg):
+        cells_csv = d / "cells.csv"
+        if not cells_csv.exists():
+            continue
         df = pd.read_csv(cells_csv)
         if df.empty or not {"x", "y", "cell_type"}.issubset(df.columns):
             continue
+        run_id = d.name
         xy = df[["x", "y"]].to_numpy(float)
         ci = clustering_index(xy, df["cell_type"].to_numpy(), COMPARTMENTS, k=knn)
-        ci.insert(0, "sample_id", sid)
+        ci.insert(0, "run_id", run_id)
+        ci.insert(1, "sample_id", sample_of(run_id))
         clust.append(ci)
         m = radial_invasiveness(xy)
-        m["sample_id"] = sid
-        m["n_agents"] = int(len(df))
+        m.update({"run_id": run_id, "sample_id": sample_of(run_id), "n_agents": int(len(df))})
         inv.append(m)
     return (pd.concat(clust, ignore_index=True) if clust else pd.DataFrame(),
             pd.DataFrame(inv) if inv else pd.DataFrame())
@@ -353,7 +371,8 @@ def load_sim_qoi(cfg) -> pd.DataFrame | None:
     frames = []
     for q in out_dir.glob("SCPCS*/output/qoi.csv"):
         d = pd.read_csv(q)
-        d["sample_id"] = q.parent.parent.name
+        d["run_id"] = q.parent.parent.name
+        d["sample_id"] = sample_of(q.parent.parent.name)
         frames.append(d)
     return pd.concat(frames, ignore_index=True) if frames else None
 
@@ -414,8 +433,11 @@ def main() -> None:
         return
     pt = pd.read_csv(resolve_path(cfg, "results/mechanotypes/per_tumor_scores.csv"))
     pt["anaplastic"] = (pt["subdiagnosis"].str.lower() == "anaplastic").astype(int)
+    # aggregate patches + replicates to ONE value per tumor: the patient is the unit of
+    # inference (patches of a tumor are not independent patients).
+    value_cols = [c for c in sim.columns if c not in ("sample_id", "run_id")]
+    sim = sim.groupby("sample_id", as_index=False)[value_cols].mean()
     merged = sim.merge(pt[["sample_id", "anaplastic", "relapse"]], on="sample_id", how="left")
-    value_cols = [c for c in sim.columns if c != "sample_id"]
     for grp in ["anaplastic", "relapse"]:
         res = patient_level_emergent_test(merged, grp, value_cols)
         res.to_csv(out_dir / f"emergent_validation_{grp}.csv", index=False)
