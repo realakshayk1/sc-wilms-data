@@ -39,6 +39,16 @@ patch:
   n_patches: 3                    # windows per tumor (spanning its composition range)
   min_spots: 8                    # a window needs >= this many in-tissue spots to qualify
 
+# Necrotic-territory seeding (02_place_agents.py). Spots with anomalously high mitochondrial
+# fraction (the necrosis readout validated in the regressive pilot, scripts 19-25) are seeded
+# as inert necrotic tissue instead of viable compartments, so the ABM starts with the tumor's
+# real necrosis geography rather than growing it purely from the O2 solver. Cohort-relative
+# z-threshold on pct_mito (data/processed/spot_qc_necrosis.parquet). enabled:false to skip.
+necrotic:
+  enabled: true
+  source: pct_mito                # column in spot_qc_necrosis.parquet
+  z_threshold: 1.5                # spot flagged necrotic if cohort z(pct_mito) exceeds this
+
 domain:
   margin_um: 100.0                # padding around the tumor bounding box
   z_um: 0.0                       # 2-D monolayer for v1

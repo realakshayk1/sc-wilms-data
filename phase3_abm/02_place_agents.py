@@ -36,6 +36,28 @@ from abm_utils import (  # noqa: E402
 )
 
 
+NECROTIC = "necrotic"                                  # inert dead-tissue agent type
+
+
+def _necrosis_flags(cfg) -> dict:
+    """spot_id -> True where cohort z(pct_mito) exceeds the threshold (necrotic territory)."""
+    nec = cfg["phase_c"].get("necrotic", {})
+    if not nec.get("enabled"):
+        return {}
+    path = resolve_path(cfg, "data/processed/spot_qc_necrosis.parquet")
+    col = nec.get("source", "pct_mito")
+    if not path.exists():
+        print(f"[warn] necrotic seeding on but {path.name} missing — skipping")
+        return {}
+    d = pd.read_parquet(path, columns=["spot_id", col])
+    x = pd.to_numeric(d[col], errors="coerce")
+    sd = x.std(ddof=0)
+    if not np.isfinite(sd) or sd == 0:
+        return {}
+    z = (x - x.mean()) / sd
+    return dict(zip(d["spot_id"], z > float(nec.get("z_threshold", 1.5))))
+
+
 def _density_lookup(cfg) -> tuple[dict, dict]:
     per_spot, per_tumor = {}, {}
     sp = resolve_path(cfg, "results/abm/spot_density.csv")
@@ -49,7 +71,7 @@ def _density_lookup(cfg) -> tuple[dict, dict]:
     return per_spot, per_tumor
 
 
-def _tumor_spots(cfg, sample_id, lib, sig) -> pd.DataFrame | None:
+def _tumor_spots(cfg, sample_id, lib, sig, nec_flags=None) -> pd.DataFrame | None:
     """In-tissue spots for a tumor with micron coords + normalised fraction columns."""
     spot = cfg["phase_c"]["spot"]
     frac_cols = cfg["phase_c"]["deconvolution"]["frac_cols"]
@@ -63,6 +85,7 @@ def _tumor_spots(cfg, sample_id, lib, sig) -> pd.DataFrame | None:
     fr = np.where(rowsum > 0, fr / rowsum, 1.0 / len(COMPARTMENTS))
     for j, c in enumerate(COMPARTMENTS):
         s[f"_p_{c}"] = fr[:, j]
+    s["_nec"] = s["spot_id"].map(nec_flags).fillna(False) if nec_flags else False
     return s
 
 
@@ -79,15 +102,17 @@ def _place_from_spots(cfg, s, rng) -> pd.DataFrame:
     for _, row in s.iterrows():
         n = int(per_spot_n.get(row["spot_id"], default_n)) if use_stardist else default_n
         n = max(int(dens["min_n"]), min(int(dens["max_n"]), n))
-        p = row[p_cols].to_numpy(float)
-        p = p / p.sum() if p.sum() > 0 else np.full(len(p), 1.0 / len(p))  # guard fp drift
-        types = rng.choice(len(COMPARTMENTS), size=n, p=p)
         ang = rng.uniform(0, 2 * np.pi, n)
         rad = radius * np.sqrt(rng.uniform(0, 1, n))       # uniform over the disc
+        if row.get("_nec", False):                         # necrotic territory: inert dead tissue
+            types = [NECROTIC] * n
+        else:
+            p = row[p_cols].to_numpy(float)
+            p = p / p.sum() if p.sum() > 0 else np.full(len(p), 1.0 / len(p))  # guard fp drift
+            types = [COMPARTMENTS[t] for t in rng.choice(len(COMPARTMENTS), size=n, p=p)]
         for k in range(n):
             rec.append((row["x_um"] + rad[k] * np.cos(ang[k]),
-                        row["y_um"] + rad[k] * np.sin(ang[k]),
-                        COMPARTMENTS[types[k]]))
+                        row["y_um"] + rad[k] * np.sin(ang[k]), types[k]))
     return pd.DataFrame(rec, columns=["x", "y", "cell_type"])
 
 
@@ -132,9 +157,9 @@ def select_patches(s: pd.DataFrame, size_um: float, n_patches: int,
     return [np.array(tiles[t], dtype=int) for t in chosen]
 
 
-def place_tumor(cfg, sample_id, lib, sig, rng) -> pd.DataFrame | None:
+def place_tumor(cfg, sample_id, lib, sig, rng, nec_flags=None) -> pd.DataFrame | None:
     """Whole-slide placement: all in-tissue spots -> one recentred cells frame."""
-    s = _tumor_spots(cfg, sample_id, lib, sig)
+    s = _tumor_spots(cfg, sample_id, lib, sig, nec_flags)
     if s is None:
         return None
     cells = _place_from_spots(cfg, s, rng)
@@ -144,10 +169,10 @@ def place_tumor(cfg, sample_id, lib, sig, rng) -> pd.DataFrame | None:
                      float(cfg["phase_c"]["domain"]["z_um"]))
 
 
-def place_tumor_patches(cfg, sample_id, lib, sig, rng) -> list[tuple]:
+def place_tumor_patches(cfg, sample_id, lib, sig, rng, nec_flags=None) -> list[tuple]:
     """Sample representative FOV patches -> [(patch_id, (cx,cy), cells), ...]."""
     pc = cfg["phase_c"]["patch"]
-    s = _tumor_spots(cfg, sample_id, lib, sig)
+    s = _tumor_spots(cfg, sample_id, lib, sig, nec_flags)
     if s is None:
         return []
     masks = select_patches(s, float(pc["size_um"]), int(pc["n_patches"]), int(pc["min_spots"]))
@@ -188,6 +213,9 @@ def main() -> None:
     )
     libs = discover_library_dirs(resolve_path(cfg, cfg["paths"]["phase_b"]["spatial_root"]))
     samples = args.sample or sorted(set(sig["sample_id"]) & set(libs))
+    nec_flags = _necrosis_flags(cfg)
+    if nec_flags:
+        print(f"[info] necrotic seeding: {sum(nec_flags.values())} spots flagged cohort-wide")
 
     summ, patch_rows, out_dir = [], [], ensure_dir(resolve_path(cfg, "results/abm"))
     for sid in samples:
@@ -196,7 +224,7 @@ def main() -> None:
             continue
         rng = rng_for(seed, f"place:{sid}")
         if patch_on:
-            patches = place_tumor_patches(cfg, sid, libs[sid], sig, rng)
+            patches = place_tumor_patches(cfg, sid, libs[sid], sig, rng, nec_flags)
             if not patches:
                 print(f"[skip] {sid}: no patch met min_spots")
                 continue
@@ -207,7 +235,7 @@ def main() -> None:
                                                 center_x_um=round(cx, 1), center_y_um=round(cy, 1)))
                 print(f"[ok] {run_id}: {len(cells)} agents")
         else:
-            cells = place_tumor(cfg, sid, libs[sid], sig, rng)
+            cells = place_tumor(cfg, sid, libs[sid], sig, rng, nec_flags)
             if cells is None or cells.empty:
                 print(f"[skip] {sid}: no placeable spots")
                 continue

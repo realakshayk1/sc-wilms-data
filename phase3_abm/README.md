@@ -97,12 +97,23 @@ needs one timed calibration run on the cluster, but the agent/voxel reductions a
 ## Run
 
 ```bash
+# authoring (CPU)
 python phase3_abm/01_spot_density.py
 python phase3_abm/02_place_agents.py            # all tumors (or --sample SCPCS000168)
 python phase3_abm/03_emit_rules.py
 python phase3_abm/04_build_model.py
 pytest tests/test_phase_c.py -q
+
+# cluster (Bridges-2), after building the grammar-enabled PhysiCell binary:
+PHYSICELL_BIN=/path/to/PhysiCell/project bash phase3_abm/calibrate.sh   # go/no-go + timing
+PHYSICELL_BIN=/path/to/PhysiCell/project REPLICATES=10 \
+  sbatch --array=0-$(( $(wc -l < results/abm/model_manifest.txt)*10 - 1 ))%200 \
+         phase3_abm/06_run_cohort.sh                                    # cohort (account/partition baked in)
 ```
+
+`calibrate.sh` times a median + max patch, sanity-checks growth (flags explosion/collapse),
+and extrapolates cohort core-hours — run it **before** the array and only proceed if both
+verdicts are OK.
 
 Configuration is in [`config/phase_c.yaml`](../config/phase_c.yaml) (spot geometry, density
 prior, deconvolution backend, domain, simulation). Base cell rates come from
@@ -128,10 +139,12 @@ prior, deconvolution backend, domain, simulation). Base cell rates come from
 - **mRNA ≠ pathway activity.** YAP/TAZ and PI3K are set post-translationally, so the crowding
   half-max rests partly on weak proxies — trust the cell-cycle effectors (CCND1/MKI67/CDKN1x)
   in the `contact_inhibition` program.
-- **Histology → positions is deferred (WSI-gated).** Agents are placed from Visium spot
-  coordinates + deconvolution (omics positions); sub-spot placement from StarDist nucleus
-  centroids and necrotic-territory seeding from the regressive map are scaffolded but off until
-  whole-slide-resolution segmentation exists (the documented Visium-hires nuclei ceiling).
+- **Histology → positions is partly deferred.** Agents are placed from Visium spot coordinates
+  + deconvolution (omics positions); **necrotic-territory seeding is on** — spots with
+  anomalously high mitochondrial fraction (cohort z(pct_mito) > 1.5, the necrosis readout
+  validated in the regressive pilot) are seeded as inert `necrotic` tissue, so the model starts
+  with the tumor's real necrosis geography. Sub-spot placement from StarDist nucleus centroids
+  remains WSI-gated (the documented Visium-hires nuclei ceiling).
 
 ## Design notes
 

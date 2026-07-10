@@ -42,9 +42,10 @@ def _sub(parent, tag, text=None, **attrib):
     return el
 
 
-def _secretion_block(ph, rates, substrates):
+def _secretion_block(ph, rates, substrates, o2_uptake=O2_UPTAKE):
     """Per-cell secretion/uptake for every substrate. Oxygen is consumed (gradient former);
-    IGF2 uptake is per-tumor (IGF program); ECM is secreted by stromal cells (v1.1)."""
+    IGF2 uptake is per-tumor (IGF program); ECM is secreted by stromal cells (v1.1). Necrotic
+    tissue passes zero rates (dead cells neither consume nor secrete)."""
     sec = _sub(ph, "secretion")
     def one(name, secretion_rate, uptake_rate, target=1.0):
         s = _sub(sec, "substrate", name=name)
@@ -52,14 +53,14 @@ def _secretion_block(ph, rates, substrates):
         _sub(s, "secretion_target", target, units="substrate density")
         _sub(s, "uptake_rate", uptake_rate, units="1/min")
         _sub(s, "net_export_rate", 0.0, units="total substrate/min")
-    one("oxygen", 0.0, O2_UPTAKE)
+    one("oxygen", 0.0, o2_uptake)
     if "IGF2" in substrates:
         one("IGF2", 0.0, rates.get("igf_uptake_rate", 0.001))
     if "ECM" in substrates:
         one("ECM", rates.get("ecm_secretion_rate", 0.0), 0.0)
 
 
-def build_xml(sample_id, tumor, dom, sim, substrates=None) -> ET.Element:
+def build_xml(sample_id, tumor, dom, sim, substrates=None, include_necrotic=False) -> ET.Element:
     substrates = substrates or {}
     root = ET.Element("PhysiCell_settings", version="devel-metadata")
 
@@ -125,6 +126,28 @@ def build_xml(sample_id, tumor, dom, sim, substrates=None) -> ET.Element:
         _sub(mot_opt, "use_2D", "true")
         _secretion_block(ph, rates, substrates)
 
+    if include_necrotic:
+        # inert necrotic tissue (seeded at high-mito spots): no cycle/death/motility/uptake —
+        # a space-filling dead-tissue scaffold, gets no grammar rules.
+        cd = _sub(defs, "cell_definition", name="necrotic", ID=str(len(COMPARTMENTS)))
+        ph = _sub(cd, "phenotype")
+        cyc = _sub(ph, "cycle", model="live", code="6")
+        _sub(_sub(cyc, "phase_transition_rates", units="1/min"), "rate", 0.0,
+             start_index="0", end_index="0", fixed_duration="false")
+        death = _sub(ph, "death")
+        _sub(_sub(death, "model", name="apoptosis", code="100"), "death_rate", 0.0, units="1/min")
+        _sub(_sub(death, "model", name="necrosis", code="101"), "death_rate", 0.0, units="1/min")
+        mech = _sub(ph, "mechanics")
+        _sub(mech, "cell_cell_adhesion_strength", 0.1, units="micron/min")
+        _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
+        mot = _sub(ph, "motility")
+        _sub(mot, "speed", 0.0, units="micron/min")
+        _sub(mot, "persistence_time", 1.0, units="min")
+        _sub(mot, "migration_bias", 0.0, units="dimensionless")
+        mo = _sub(mot, "options"); _sub(mo, "enabled", "false"); _sub(mo, "use_2D", "true")
+        _secretion_block(ph, {"igf_uptake_rate": 0.0, "ecm_secretion_rate": 0.0},
+                         substrates, o2_uptake=0.0)     # dead: no uptake/secretion
+
     rules = _sub(root, "cell_rules")
     rs = _sub(rules, "rulesets")
     r = _sub(rs, "ruleset", protocol="CBHG", version="3.0", format="csv", enabled="true")
@@ -152,6 +175,7 @@ def main() -> None:
     cfg = load_config()
     sim = cfg["phase_c"]["simulation"]
     substrates = cfg["phase_c"].get("substrates", {})
+    include_necrotic = bool(cfg["phase_c"].get("necrotic", {}).get("enabled"))
     margin = float(cfg["phase_c"]["domain"]["margin_um"])
     abm = yaml.safe_load(resolve_path(cfg, "results/abm/positives_to_physicell.yaml").read_text())
     out_dir = resolve_path(cfg, "results/abm")
@@ -183,7 +207,7 @@ def main() -> None:
         cells = pd.read_csv(cells_csv)
         dom = {"x_max": round(cells["x"].max() + margin, 1),
                "y_max": round(cells["y"].max() + margin, 1)}
-        root = build_xml(run_id, tumor, dom, sim, substrates)
+        root = build_xml(run_id, tumor, dom, sim, substrates, include_necrotic)
         xml = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
         (run_d / "PhysiCell_settings.xml").write_text(xml)
         prov = {"run_id": run_id, "sample_id": sid, "seed": cfg["phase_c"]["seed"],

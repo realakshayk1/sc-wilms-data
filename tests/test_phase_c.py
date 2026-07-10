@@ -220,6 +220,25 @@ def test_select_patches_diverse_and_deterministic():
     assert place.select_patches(s, size_um=500.0, n_patches=2, min_spots=99) == []
 
 
+def test_necrotic_spot_places_inert_necrotic_agents():
+    """A spot flagged necrotic (_nec=True) seeds inert 'necrotic' agents; a viable spot seeds
+    its compartment. Uses the real config so density/spot geometry resolve."""
+    au = _load("abm_utils.py")
+    place = _load("02_place_agents.py")
+    import pandas as pd
+    cfg = au.load_config()
+    s = pd.DataFrame([
+        {"spot_id": "A", "x_um": 0.0, "y_um": 0.0, "_p_blastemal": 1.0,
+         "_p_epithelial": 0.0, "_p_stromal": 0.0, "_nec": True},
+        {"spot_id": "B", "x_um": 200.0, "y_um": 0.0, "_p_blastemal": 1.0,
+         "_p_epithelial": 0.0, "_p_stromal": 0.0, "_nec": False},
+    ])
+    cells = place._place_from_spots(cfg, s, au.rng_for(42, "t"))
+    assert (cells.cell_type == place.NECROTIC).sum() > 0      # necrotic spot -> necrotic agents
+    assert (cells.cell_type == "blastemal").sum() > 0         # viable spot -> compartment
+    assert set(cells.cell_type) <= {place.NECROTIC, "blastemal"}
+
+
 def test_sample_of_run_id():
     v = _load("07_validate.py")
     assert v.sample_of("SCPCS000168__p2") == "SCPCS000168"

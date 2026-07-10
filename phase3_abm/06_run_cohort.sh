@@ -20,6 +20,8 @@
 # NOTE: array size = n_runs * REPLICATES may exceed the scheduler MaxArraySize (often 1001);
 # chunk with several `sbatch --array=A-B` submissions if so.
 #SBATCH --job-name=wilms_abm
+#SBATCH --account=mcb200052p
+#SBATCH --partition=RM-shared
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --time=02:00:00
@@ -27,6 +29,7 @@
 set -euo pipefail
 
 : "${PHYSICELL_BIN:?set PHYSICELL_BIN to the compiled PhysiCell project binary}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"     # PhysiCell is OpenMP; match the cores
 REPLICATES="${REPLICATES:-10}"
 ROOT="$(git rev-parse --show-toplevel)"
 MANIFEST="$ROOT/results/abm/model_manifest.txt"
