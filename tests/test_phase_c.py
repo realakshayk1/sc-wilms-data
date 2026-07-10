@@ -74,6 +74,78 @@ def test_rules_schema():
     assert ox["saturation_value"] == pytest.approx(1.5 * 0.05)
 
 
+def test_rules_half_max_per_tumor_and_fallback():
+    """The oxygen-necrosis and pressure half-maxes come from the per-tumor `half_max` block
+    (17_positives_to_abm.py); absent -> documented defaults."""
+    mod = _load("03_emit_rules.py")
+    rates = {"proliferation_rate": 0.05, "apoptosis_rate": 0.001, "adhesion_strength": 0.3}
+    # fallback (no half_max) uses DEFAULT_HM
+    base = {r["behavior"] + "|" + r["signal"]: r["half_max"] for r in mod.rules_for("blastemal", rates)}
+    assert base["necrosis|oxygen"] == pytest.approx(mod.DEFAULT_HM["oxygen_necrosis"])
+    assert base["cycle entry|pressure"] == pytest.approx(mod.DEFAULT_HM["pressure_cycle"])
+    # per-tumor override flows into the emitted rows
+    hm = {"oxygen_cycle": 12.0, "oxygen_necrosis": 3.5, "pressure_cycle": 0.7}
+    got = {r["behavior"] + "|" + r["signal"]: r["half_max"] for r in mod.rules_for("blastemal", rates, hm)}
+    assert got["necrosis|oxygen"] == pytest.approx(3.5)
+    assert got["cycle entry|pressure"] == pytest.approx(0.7)
+    assert got["cycle entry|oxygen"] == pytest.approx(12.0)
+
+
+def test_clustering_index_segregation_vs_mixing():
+    v = _load("07_validate.py")
+    cats = ["blastemal", "stromal"]
+    # two separated homotypic blocks -> clustering index > 1 for each type
+    left = np.column_stack([np.zeros(40), np.linspace(0, 40, 40)])
+    right = np.column_stack([np.full(40, 100.0), np.linspace(0, 40, 40)])
+    seg = v.clustering_index(np.vstack([left, right]),
+                             np.array(["blastemal"] * 40 + ["stromal"] * 40), cats, k=4)
+    assert (seg["clustering_index"] > 1.2).all()
+    # interleaved checkerboard -> index near 1 (well mixed)
+    xs, ys = np.meshgrid(np.arange(10), np.arange(10))
+    coords = np.column_stack([xs.ravel(), ys.ravel()]).astype(float)
+    lab = np.where((coords[:, 0].astype(int) + coords[:, 1].astype(int)) % 2 == 0,
+                   "blastemal", "stromal")
+    mix = v.clustering_index(coords, lab, cats, k=4)
+    assert (mix["clustering_index"] < 1.05).all()
+
+
+def test_radial_invasiveness_reacts_to_outliers():
+    """Against a FIXED reference radius (as the sim uses the t0 median at later timepoints),
+    a compact mass has no projections beyond it; adding far spokes creates invasive ones."""
+    v = _load("07_validate.py")
+    rng = np.random.default_rng(0)
+    disc = rng.normal(0, 3, (200, 2))                     # p95 radius ~ 7 um
+    ref = 15.0                                            # fixed reference the disc never reaches
+    compact = v.radial_invasiveness(disc, reference_radius=ref)
+    assert compact["n_invasive_projections"] == 0
+    assert compact["invasive_fraction"] == 0.0
+    spokes = np.array([[80.0, 0.0], [-80.0, 0.0], [0.0, 80.0], [0.0, -80.0]])
+    invasive = v.radial_invasiveness(np.vstack([disc, spokes]), reference_radius=ref)
+    assert invasive["n_invasive_projections"] >= 4        # the four spokes' sectors
+    assert invasive["invasive_fraction"] > 0.0
+    assert invasive["radial_p95_over_ref"] > compact["radial_p95_over_ref"]
+
+
+def test_zscore_col_optional_and_neutral():
+    import pandas as pd
+    import importlib.util as _il
+    path = ROOT / "phase2_histology_ml" / "17_positives_to_abm.py"
+    sys.path.insert(0, str(ROOT / "phase2_histology_ml"))
+    spec = _il.spec_from_file_location("positives_to_abm", path)
+    try:
+        mod = _il.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:  # pragma: no cover
+        pytest.skip(f"cannot import 17_positives_to_abm: {e}")
+    df = pd.DataFrame({"present": [1.0, 2.0, 3.0, 4.0]})
+    # absent column -> all zeros (neutral)
+    assert (mod.zscore_col(df, "missing") == 0.0).all()
+    # present column -> proper z-score (mean 0, unit population std)
+    z = mod.zscore_col(df, "present")
+    assert z.mean() == pytest.approx(0.0, abs=1e-9)
+    assert z.std(ddof=0) == pytest.approx(1.0, abs=1e-9)
+
+
 def test_placement_smoke_if_data_present():
     """Deterministic, in-bounds placement with fractions summing to 1 — real data only."""
     au = _load("abm_utils.py")

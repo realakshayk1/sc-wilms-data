@@ -129,6 +129,88 @@ def co_occurrence(coords: np.ndarray, labels: np.ndarray, categories: list[str],
     return pd.DataFrame(rows)
 
 
+# --------------------------------------------------- geometry QoIs (cells.csv / sim output)
+def clustering_index(coords: np.ndarray, labels: np.ndarray, categories: list[str],
+                     k: int = 6) -> pd.DataFrame:
+    """Homotypic-neighbour clustering index per cell type (CRPC-ABM QoI). For each agent,
+    the fraction of its k nearest neighbours sharing its type; averaged per type and
+    normalised by that type's global frequency. index>1 => that type self-segregates into
+    clusters; ~1 => well mixed. Computed on the initial cells.csv now (baseline) and on the
+    simulated endpoint later."""
+    lab = np.asarray(labels)
+    n = len(lab)
+    if n <= k:
+        return pd.DataFrame(columns=["cell_type", "homotypic_frac", "expected_frac",
+                                     "clustering_index", "n"])
+    _, idx = cKDTree(coords).query(coords, k=k + 1)
+    neigh = idx[:, 1:]                                   # drop self
+    homo = np.array([(lab[neigh[i]] == lab[i]).mean() for i in range(n)])
+    rows = []
+    for c in categories:
+        m = lab == c
+        if not m.any():
+            continue
+        exp = float(m.mean())
+        obs = float(homo[m].mean())
+        rows.append({"cell_type": c, "homotypic_frac": round(obs, 4),
+                     "expected_frac": round(exp, 4),
+                     "clustering_index": round(obs / exp, 3) if exp > 0 else np.nan,
+                     "n": int(m.sum())})
+    return pd.DataFrame(rows)
+
+
+def radial_invasiveness(coords: np.ndarray, reference_radius: float | None = None,
+                        n_sectors: int = 36, extension: float = 1.0) -> dict:
+    """Invasiveness from tumor shape (Johnson et al. Cell 2025 STAR Methods): distance from
+    each agent to the mass centroid; count angular sectors whose furthest agent extends
+    beyond a reference radius (the initial-time median, when supplied). More projections /
+    larger radial spread => more invasive. On the initial cells.csv this is the baseline
+    reference; pass `reference_radius` from t0 to score later time points."""
+    coords = np.asarray(coords, float)
+    if len(coords) == 0:
+        return {"reference_radius_um": np.nan, "n_invasive_projections": 0,
+                "invasive_fraction": np.nan, "radial_p95_over_ref": np.nan}
+    centre = coords.mean(axis=0)
+    rel = coords - centre
+    d = np.hypot(rel[:, 0], rel[:, 1])
+    ref = float(np.median(d)) if reference_radius is None else float(reference_radius)
+    ang = np.arctan2(rel[:, 1], rel[:, 0])
+    sec = (((ang + np.pi) / (2 * np.pi)) * n_sectors).astype(int) % n_sectors
+    sector_max = np.zeros(n_sectors)
+    for s in range(n_sectors):
+        m = sec == s
+        if m.any():
+            sector_max[s] = d[m].max()
+    thr = ref * extension
+    return {"reference_radius_um": round(ref, 2),
+            "n_invasive_projections": int((sector_max > thr).sum()),
+            "invasive_fraction": round(float((d > thr).mean()), 4),
+            "radial_p95_over_ref": round(float(np.percentile(d, 95) / ref), 3) if ref > 0 else np.nan}
+
+
+def initial_condition_qoi(cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Clustering index + invasiveness on each tumor's initial cells.csv. This is the t0
+    baseline the simulated endpoints are later compared against (per-tumor, patient-level)."""
+    out_dir = resolve_path(cfg, "results/abm")
+    knn = int(cfg["phase_c"]["spatial_qoi"]["knn"])
+    clust, inv = [], []
+    for cells_csv in sorted(out_dir.glob("SCPCS*/cells.csv")):
+        sid = cells_csv.parent.name
+        df = pd.read_csv(cells_csv)
+        if df.empty or not {"x", "y", "cell_type"}.issubset(df.columns):
+            continue
+        xy = df[["x", "y"]].to_numpy(float)
+        ci = clustering_index(xy, df["cell_type"].to_numpy(), COMPARTMENTS, k=knn)
+        ci.insert(0, "sample_id", sid)
+        clust.append(ci)
+        m = radial_invasiveness(xy)
+        m["sample_id"] = sid
+        m["n_agents"] = int(len(df))
+        inv.append(m)
+    return (pd.concat(clust, ignore_index=True) if clust else pd.DataFrame(),
+            pd.DataFrame(inv) if inv else pd.DataFrame())
+
+
 def has_squidpy() -> bool:
     import importlib.util
     return importlib.util.find_spec("squidpy") is not None
@@ -312,7 +394,20 @@ def main() -> None:
             nhood_z.to_csv(out_dir / "observed_nhood_z_squidpy.csv", index=False)
             print(f"[ok] squidpy nhood z    -> {out_dir/'observed_nhood_z_squidpy.csv'}")
 
-    # 2. emergent test (only if sim QoIs exist)
+    # 2. initial-condition geometry QoIs (CPU, now): clustering index + invasiveness on the
+    #    seeded cells.csv — the t0 baseline the simulated endpoints are compared against.
+    clust, inv = initial_condition_qoi(cfg)
+    if not clust.empty:
+        clust.to_csv(out_dir / "initial_clustering_index.csv", index=False)
+        print(f"[ok] initial clustering index -> {out_dir/'initial_clustering_index.csv'} "
+              f"({clust.sample_id.nunique()} tumors)")
+        print("[info] mean clustering index by type (>1 = self-segregated at t0):")
+        print(clust.groupby("cell_type")["clustering_index"].mean().round(3).to_string())
+    if not inv.empty:
+        inv.to_csv(out_dir / "initial_invasiveness.csv", index=False)
+        print(f"[ok] initial invasiveness     -> {out_dir/'initial_invasiveness.csv'}")
+
+    # 3. emergent test (only if sim QoIs exist)
     sim = load_sim_qoi(cfg)
     if sim is None:
         print("[pending] no simulation QoIs yet — emergent test runs after the cluster cohort.")

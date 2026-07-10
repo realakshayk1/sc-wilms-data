@@ -8,6 +8,7 @@ results/*
 
 # internal planning notes (not part of the public repo)
 phase3_abm/PLAN.md
+phase3_abm/PLAN_omics_to_params.md
 
 # secrets
 .env

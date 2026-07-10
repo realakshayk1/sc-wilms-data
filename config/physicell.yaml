@@ -8,19 +8,25 @@ domain:
   dy_um: 20
 
 cell_types:
+  # migration_speed (um/min) base priors follow the EMT prior: blastemal (mesenchymal-like
+  # small-round-blue-cell) is most motile, epithelial (tubular) least, stromal mid. The
+  # per-tumor EMT score scales these reciprocally with adhesion in 17_positives_to_abm.py.
   blastemal:
     proliferation_rate: 0.05
     adhesion_strength: 0.3
     apoptosis_rate: 0.001
+    migration_speed: 0.5
   epithelial:
     proliferation_rate: 0.01
     adhesion_strength: 0.8
     apoptosis_rate: 0.002
+    migration_speed: 0.1
   stromal:
     proliferation_rate: 0.005
     adhesion_strength: 0.5
     apoptosis_rate: 0.001
     ecm_stiffness: 1.5
+    migration_speed: 0.25
 
 fraction_to_parameter:
   blastemal:

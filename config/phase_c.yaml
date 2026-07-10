@@ -55,7 +55,22 @@ uq:
   pct_levels: [1, 5, 10, 20]      # symmetric +/- perturbations, percent
   params:
     oxygen_cycle_half_max: 10.0   # rules: oxygen -> cycle entry half-max (mmHg)
-    oxygen_necrosis_half_max: 5.0 # rules: oxygen -> necrosis half-max (mmHg)
-    pressure_half_max: 1.0        # rules: pressure -> cycle entry half-max
+    oxygen_necrosis_half_max: 5.0 # rules: oxygen -> necrosis half-max (mmHg) [per-tumor: hypoxia score]
+    pressure_half_max: 1.0        # rules: pressure -> cycle entry half-max [per-tumor: contact-inhibition score]
     adhesion_strength: 0.4        # mechanics base (overridden per tumor if present)
+    migration_speed: 0.3          # mechanics base (per-tumor EMT-scaled; um/min)
     proliferation_saturation: 1.0 # multiplier on rule saturation values
+
+# Per-tumor determination of base rates + rule half-maxes from omics program scores
+# (phase2_histology_ml/17_positives_to_abm.py). Transparent, bounded, no fitting. Absent
+# score columns -> neutral (multiplier 1.0 / base half-max). See config/abm_programs.yaml.
+omics_to_params:
+  # base-rate multipliers: value = base * clip(1 + k*z, lo, hi) on the per-tumor program z-score
+  emt_adhesion_k: 0.25          # +1 SD mesenchymal EMT index -> ~0.75x adhesion (reciprocal below)
+  emt_motility_k: 0.40          # +1 SD mesenchymal EMT index -> ~1.4x migration speed
+  adhesion_bounds: [0.4, 1.6]
+  motility_bounds: [0.4, 2.0]
+  # rule half-max shifts: half_max = base * clip(1 - k*z, lo, hi); higher program -> lower half-max
+  pressure_halfmax_k: 0.30      # higher contact-inhibition -> brake engages at lower pressure
+  necrosis_halfmax_k: 0.30      # higher hypoxia tolerance -> necrosis at lower O2
+  halfmax_bounds: [0.5, 1.5]

@@ -15,11 +15,33 @@ grammar-enabled PhysiCell (≥1.14.1).
 |---|---|---|
 | 1 | `01_spot_density.py` | `results/abm/{spot,tumor}_density.csv` — StarDist nuclei/spot (diagnostic; see note) |
 | 2 | `02_place_agents.py` | `cells.csv` — agents at Visium coords (µm), identities from deconvolution |
-| 3 | `03_emit_rules.py` | `rules.csv` (+ `rules_annotated.csv`) — grammar, saturation anchored to base rates |
-| 4 | `04_build_model.py` | `PhysiCell_settings.xml` + `provenance.json` — domain + oxygen + cell defs |
+| 3 | `03_emit_rules.py` | `rules.csv` (+ `rules_annotated.csv`) — grammar; oxygen-necrosis + pressure half-maxes are **per-tumor** (hypoxia / crowding programs) |
+| 4 | `04_build_model.py` | `PhysiCell_settings.xml` + `provenance.json` — domain + oxygen + cell defs (incl. per-tumor motility) |
 
 Downstream: `05_uq.py` sensitivity sweep, `06_run_cohort.sh` SLURM array (cluster),
 `07_validate.py` emergent (patient-level growth/invasion) + spatial QoIs.
+
+### Omics-determined parameters (v1)
+
+Beyond the initial fractions + proliferation/apoptosis multipliers, `17_positives_to_abm.py`
+derives, per tumor, from snRNA program scores, with **transparent bounded transforms (no
+fitting)** and a **neutral fallback** when a score is absent. The scores are produced by
+`phase1_mechanotypes/17_abm_program_scores.R` (run after `16_prognostic_association.R`; same
+z-scored pseudobulk-logCPM method), which augments `per_tumor_scores.csv` from the gene sets
+in `config/abm_programs.yaml`:
+
+| Program | PhysiCell parameter | direction |
+|---|---|---|
+| EMT (epithelial vs mesenchymal) | `adhesion_strength` + `migration_speed` (reciprocal) | mesenchymal ↑ → adhesion ↓, motility ↑ |
+| Contact-inhibition (crowding) | `pressure→cycle-entry` **half-max** | higher → brake at lower pressure |
+| Hypoxia tolerance | `oxygen→necrosis` **half-max** | higher → necrosis at lower O₂ |
+
+Half-maxes are the omics-determined knob because they dominate ABM QoIs (Johnson et al.,
+*Cell* 2025, Fig 2E), unlike base-rate perturbations. Bounds/slopes live in
+`config/phase_c.yaml → omics_to_params`. IGF2 uptake + ECM→motility land in v1.1 (see the
+internal plan). New geometry QoIs in `07_validate.py`: **clustering index** (homotypic
+self-segregation) and **invasiveness** (radial projections, per the *Cell* 2025 STAR Methods),
+computed on the initial `cells.csv` now as the t0 baseline.
 
 ## Spatial validation QoIs (`07_validate.py`)
 

@@ -87,6 +87,14 @@ def build_xml(sample_id, tumor, dom, sim) -> ET.Element:
         _sub(mech, "cell_cell_adhesion_strength", rates.get("adhesion_strength", 0.4),
              units="micron/min")
         _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
+        # motility: per-tumor migration speed (EMT-scaled in 17_positives_to_abm.py)
+        mot = _sub(ph, "motility")
+        _sub(mot, "speed", rates.get("migration_speed", 0.3), units="micron/min")
+        _sub(mot, "persistence_time", 1.0, units="min")
+        _sub(mot, "migration_bias", 0.5, units="dimensionless")
+        mot_opt = _sub(mot, "options")
+        _sub(mot_opt, "enabled", "true")
+        _sub(mot_opt, "use_2D", "true")
 
     rules = _sub(root, "cell_rules")
     rs = _sub(rules, "rulesets")
