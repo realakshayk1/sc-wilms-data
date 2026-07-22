@@ -9,6 +9,10 @@ results/*
 # internal planning notes (not part of the public repo)
 phase3_abm/PLAN.md
 phase3_abm/PLAN_omics_to_params.md
+phase3_abm/PLAN_couplings_and_bounding.md
+
+# build / packaging artifacts
+*.tgz
 
 # secrets
 .env

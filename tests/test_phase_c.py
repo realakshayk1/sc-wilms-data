@@ -127,13 +127,14 @@ def test_build_xml_substrates_and_secretion():
                          {"max_time_min": 100, "save_interval_min": 10}, substrates)
     names = {v.get("name") for v in root.iter("variable")}
     assert {"oxygen", "IGF2", "ECM"}.issubset(names)
-    # each cell definition has a secretion entry per substrate (oxygen + IGF2 + ECM = 3)
+    # each cell definition's SECRETION block has an entry per substrate (oxygen + IGF2 + ECM)
     for cd in root.iter("cell_definition"):
-        subs = [s.get("name") for s in cd.iter("substrate")]
+        sec = cd.find("phenotype/secretion")
+        subs = [s.get("name") for s in sec.findall("substrate")]
         assert subs == ["oxygen", "IGF2", "ECM"]
-    # stromal secretes ECM; tumor cells do not
+    # stromal secretes ECM; default / tumor cells do not
     for cd in root.iter("cell_definition"):
-        for s in cd.iter("substrate"):
+        for s in cd.find("phenotype/secretion").findall("substrate"):
             if s.get("name") == "ECM":
                 rate = float(s.find("secretion_rate").text)
                 assert (rate > 0) == (cd.get("name") == "stromal")
@@ -355,6 +356,93 @@ def test_generate_sweep_design():
     assert a_p10["perturbed_value"] == pytest.approx(11.0)
     a_m20 = df[(df.param == "a") & (df.pct == -20)].iloc[0]
     assert a_m20["perturbed_value"] == pytest.approx(8.0)
+
+
+def test_virtual_cohort_preserves_marginal_and_correlation():
+    """The Gaussian-copula draw keeps each lever's empirical range and approximately recovers the
+    coupling; deterministic given seed."""
+    mod = _load("05_uq.py")
+    rng = np.random.default_rng(0)
+    n = 40
+    a = rng.standard_normal(n)
+    b = 0.8 * a + np.sqrt(1 - 0.64) * rng.standard_normal(n)     # ~0.8 correlated
+    scores = pd.DataFrame({"L1": a, "L2": b})
+    corr = scores.corr()
+    draws = mod.generate_virtual_cohort(scores, corr, ["L1", "L2"], n_draws=3000, seed=42)
+    assert list(draws.columns) == ["draw_id", "L1", "L2"]
+    # empirical-marginal inversion keeps draws within the observed support
+    assert draws.L1.min() >= scores.L1.min() - 1e-9 and draws.L1.max() <= scores.L1.max() + 1e-9
+    # coupling approximately recovered (ridge + copula attenuate slightly)
+    r = draws[["L1", "L2"]].corr().iloc[0, 1]
+    assert 0.55 < r < 0.9
+    # deterministic
+    assert draws.equals(mod.generate_virtual_cohort(scores, corr, ["L1", "L2"], n_draws=3000, seed=42))
+
+
+def test_apply_transfer_axis_and_bounds():
+    """Extrinsic axes are the transfer-weighted lever sum; params stay within the configured bounds."""
+    mod = _load("05_uq.py")
+    draws = pd.DataFrame({"draw_id": ["v0", "v1"], "proliferation": [2.0, -2.0],
+                          "tp53_target": [0.0, 0.0], "wnt_canonical": [0.0, 0.0],
+                          "blastemal_nephrogenic": [0.0, 0.0], "igf": [1.0, -1.0],
+                          "emt_axis": [1.5, -1.5]})
+    transfer = {"measured": {"crowding_sensitivity": {"proliferation": {"beta": -0.6}},
+                             "hypoxia_tolerance": {"tp53_target": {"beta": 0.3}}}}
+    o2p = {"pressure_halfmax_k": 0.30, "necrosis_halfmax_k": 0.30, "halfmax_bounds": [0.5, 1.5],
+           "emt_adhesion_k": 0.25, "emt_motility_k": 0.40, "adhesion_bounds": [0.4, 1.6],
+           "motility_bounds": [0.4, 2.0], "igf_uptake_k": 0.40, "uptake_bounds": [0.4, 2.5]}
+    base_hm = {"pressure_half_max": 1.0, "oxygen_necrosis_half_max": 5.0}
+    d = mod.apply_transfer(draws, transfer, o2p, base_hm)
+    # crowding_z = -0.6 * proliferation
+    assert d["crowding_z"].iloc[0] == pytest.approx(-1.2)
+    assert d["crowding_z"].iloc[1] == pytest.approx(1.2)
+    # high proliferation -> LOW crowding sensitivity (crowd_z<0) -> HIGHER pressure half-max
+    # (less contact-inhibited, cycle brake engages at higher pressure), within bounds
+    assert d["pressure_half_max"].iloc[0] > d["pressure_half_max"].iloc[1]
+    assert (d["pressure_half_max"] >= 0.5 * 1.0 - 1e-9).all()
+    assert (d["adhesion_mult"].between(0.4, 1.6)).all()
+    assert (d["igf_uptake_mult"].between(0.4, 2.5)).all()
+
+
+def _load_phase2(fname: str):
+    import importlib.util as _il
+    path = ROOT / "phase2_histology_ml" / fname
+    sys.path.insert(0, str(ROOT / "phase2_histology_ml"))
+    spec = _il.spec_from_file_location(path.stem.lstrip("0123456789_") or "mod2", path)
+    mod = _il.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as e:  # pragma: no cover
+        pytest.skip(f"cannot import {fname}: {e}")
+    return mod
+
+
+def test_morans_i_clustered_vs_checkerboard():
+    ta = _load_phase2("26_tissue_architecture.py")
+    # 10x10 grid; two spatially separated blocks -> high Moran's I; checkerboard -> negative
+    xs, ys = np.meshgrid(np.arange(10), np.arange(10))
+    coords = np.column_stack([xs.ravel().astype(float), ys.ravel().astype(float)])
+    pairs, _ = ta._adjacency(coords, spacing_mult=1.2)          # rook adjacency
+    block = (coords[:, 0] < 5).astype(float)                    # left half hot, right half cold
+    checker = ((coords[:, 0].astype(int) + coords[:, 1].astype(int)) % 2).astype(float)
+    assert ta.morans_i(block, pairs) > 0.5
+    assert ta.morans_i(checker, pairs) < 0.0
+
+
+def test_detect_nodules_counts_separated_masses():
+    ta = _load_phase2("26_tissue_architecture.py")
+    xs, ys = np.meshgrid(np.arange(10), np.arange(10))
+    coords = np.column_stack([xs.ravel().astype(float), ys.ravel().astype(float)])
+    pairs, _ = ta._adjacency(coords, spacing_mult=1.2)
+    # two 3x3 blastemal masses at opposite corners, rest empty
+    mask = np.zeros(len(coords), bool)
+    for cx, cy in [(1, 1), (8, 8)]:
+        for i in range(len(coords)):
+            if abs(coords[i, 0] - cx) <= 1 and abs(coords[i, 1] - cy) <= 1:
+                mask[i] = True
+    nod = ta.detect_nodules(mask, pairs, min_size=3)
+    assert len(nod) == 2                                        # two separated masses
+    assert all(s == 9 for s in nod)                            # each 3x3 = 9 spots
 
 
 def test_compute_qoi():

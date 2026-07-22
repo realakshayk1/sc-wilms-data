@@ -1,0 +1,111 @@
+# Curated DISJOINT lever / axis gene panels for the WS1 coupling analysis.
+#
+# SEPARATE, on purpose, from:
+#   - config/features.yaml   — FROZEN Phase A Wasserstein feature list ("do not add/drop"); untouched.
+#   - config/abm_programs.yaml — ABM param-mapping contract (column ids consumed by
+#     phase2_histology_ml/17_positives_to_abm.py: emt_*/contact_inhibition/hypoxia/igf _score); untouched.
+#
+# Design rule (audit finding A — shared-gene tautology): any two programs that are COMPARED
+# (a coupling-network edge, or a transfer predictor↔response pair) MUST be gene-disjoint, else the
+# association is definitional, not biological. Disjointness among {levers ∪ extrinsic_axes} is
+# machine-checked by phase1_mechanotypes/coupling_geneset_audit.py -> results/couplings/geneset_overlap.csv.
+#
+# role semantics:
+#   lever            — intrinsic knob; enters the coupling network AND is a cross-coupling predictor.
+#   extrinsic_axis   — microenvironment response scored from tissue; a transfer RESPONSE. Disjoint
+#                      from every lever it is regressed on.
+#   definitional_map — an extrinsic ABM parameter defined BY a lever's own genes (EMT→adhesion,
+#                      IGF→uptake). NOT measured/regressed — stays a literature prior in
+#                      config/phase_c.yaml:omics_to_params. Has no genes of its own.
+#   typing_only      — compartment identity for cell-typing / deconvolution. NEVER a lever; allowed
+#                      to overlap levers (excluded from the disjointness assertion).
+#
+# FIRST-PASS for red-lining. Biology calls to check: LGR5/ASCL2/MEOX1 detection in snRNA; whether
+# TRPV4/AMOTL2 belong in crowding; whether SNAI2/ZEB2 add over SNAI1/ZEB1.
+
+seed: 42
+min_pos_genes: 3          # need >=3 positive genes present in the matrix to form a score
+
+# ------------------------------------------------------------------ intrinsic levers (the knobs)
+levers:
+  - id: proliferation
+    label: Cell-cycle proliferation
+    genes_positive: [MKI67, TOP2A, PCNA, CDK1, UBE2C, CCNB1, CCNB2, AURKA, PLK1, FOXM1]
+    genes_negative: []
+    note: cell-cycle effectors only; CCND1 dropped (shared with Wnt/crowding).
+
+  - id: tp53_target
+    label: p53 transcriptional-target activity
+    genes_positive: [CDKN1A, MDM2, BAX, GADD45A, RRM2B, ZMAT3, FAS, SESN1, PMAIP1]
+    genes_negative: []
+    note: >-
+      CDKN1A kept here and REMOVED from crowding to keep the pair disjoint. SFN dropped
+      (snRNA detect frac 0.0002). snRNA-DROPOUT-PRONE: only 6/9 positives detected in
+      single-nucleus (CDKN1A/BBC3/PMAIP1/GADD45A are low); all present in bulk -> score
+      this axis from BULK preferentially. Cell-level tp53 is Hippo-of-p53: weak, use with care.
+
+  - id: wnt_canonical
+    label: Canonical Wnt / beta-catenin targets
+    genes_positive: [AXIN2, NKD1, RNF43, NOTUM, LGR5, LEF1, TCF7, TCF7L2]
+    genes_negative: []
+    note: >-
+      direct beta-catenin targets only; MYC and CCND1 dropped (generic proliferation);
+      ASCL2 dropped (snRNA detect frac 0.0003). NOTUM/RNF43 low in snRNA but present in bulk.
+
+  - id: blastemal_nephrogenic
+    label: Blastemal / nephron-progenitor program (merged)
+    genes_positive: [SIX1, SIX2, CITED1, EYA1, SALL1, PAX2, GDNF, WT1, MEOX1]
+    genes_negative: []
+    note: subsumes the old blastemal_dev + wt1_activity (not separable by expression).
+
+  - id: igf
+    label: IGF signalling / receptor (11p15 LOI axis)
+    genes_positive: [IGF2, IGF1R, IGF2BP1, IGF2BP3]
+    genes_negative: []
+
+  - id: emt_axis
+    label: EMT (signed mesenchymal − epithelial), tumor-cell-scoped
+    scope: [blastemal, epithelial]     # scored in tumor compartments only; de-confounds VIM=stroma
+    genes_positive: [VIM, CDH2, SNAI1, SNAI2, ZEB1, ZEB2, FN1, ITGB1]   # mesenchymal pole
+    genes_negative: [CDH1, EPCAM, KRT8, KRT18]                          # epithelial pole
+    note: ONE signed axis, not two programs. Positive = more mesenchymal.
+
+# ------------------------------------------------------- extrinsic axes (transfer RESPONSES → ABM)
+extrinsic_axes:
+  - id: crowding_sensitivity
+    label: Contact-inhibition / mechanosensing
+    maps_to: pressure_half_max
+    genes_positive: [LATS1, LATS2, YAP1, WWTR1, PIEZO1, TRPV4, NF2, AMOTL2]
+    hippo_core: [LATS1, LATS2, YAP1, WWTR1, NF2]   # the snRNA-detectable subset
+    genes_negative: []
+    caveat: >-
+      mRNA is a weak proxy for YAP/TAZ ACTIVITY (documented). RESOLUTION-SPLIT: PIEZO1/TRPV4/
+      AMOTL2 are snRNA-dropout (detect frac <0.02) -> at CELL level score `hippo_core` only;
+      at BULK use the full set (all present in bulk). Thinnest axis at cell level.
+
+  - id: hypoxia_tolerance
+    label: Hypoxia tolerance
+    maps_to: oxygen_necrosis_half_max
+    genes_positive: [HIF1A, VEGFA, EPAS1, CA9, SLC2A1, LDHA, PGK1]
+    genes_negative: []
+
+# --------------------------------- definitional maps (literature priors; NOT regressed, no genes)
+definitional_maps:
+  - id: adhesion_motility
+    defined_by: emt_axis
+    maps_to: [adhesion_strength, migration_speed]
+  - id: igf_uptake
+    defined_by: igf
+    maps_to: [igf_uptake_rate]
+
+# ------------------------------------ typing-only compartment programs (never levers; may overlap)
+typing_only:
+  - id: blastemal_compartment
+    genes_positive: [WT1, SIX2, SIX1, CITED1, DAPL1, NCAM1]
+    genes_negative: [EPCAM, KRT8, KRT18]
+  - id: epithelial_compartment
+    genes_positive: [EPCAM, KRT8, KRT18, CDH1, LCN2]
+    genes_negative: [VIM, COL1A1, SIX2]
+  - id: stromal_compartment
+    genes_positive: [VIM, COL1A1, COL3A1, DCN, LUM, ACTA2]
+    genes_negative: [EPCAM, WT1]
