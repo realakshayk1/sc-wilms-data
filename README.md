@@ -17,12 +17,13 @@ Computational pipeline that characterizes how Wilms tumor's **blastemal / epithe
 5. [Phase B — Histology ML (Visium H&E)](#phase-b--histology-ml-visium-he)
 6. [Results summary](#results-summary)
 7. [ABM initial conditions](#abm-initial-conditions-physicell)
-8. [Figure gallery](#figure-gallery)
-9. [Quick start](#quick-start)
-10. [Repository layout](#repository-layout)
-11. [Configuration](#configuration)
-12. [Limitations & next steps](#limitations--next-steps)
-13. [References & citation](#references--citation)
+8. [Phase C — Coupled levers & resolution-bounded seeding](#phase-c--coupled-levers--resolution-bounded-seeding)
+9. [Figure gallery](#figure-gallery)
+10. [Quick start](#quick-start)
+11. [Repository layout](#repository-layout)
+12. [Configuration](#configuration)
+13. [Limitations & next steps](#limitations--next-steps)
+14. [References & citation](#references--citation)
 
 ---
 
@@ -314,7 +315,10 @@ neighbourhood clustering z≈7.9).
 | **H&E predicts anaplasia** | Tumor-level AUC **0.748** (attention-MIL), perm p=0.003; StarDist morphology 0.687 (p=0.021) |
 | **H&E predicts continuous composition** | No — LOTO *r*≈0 (FM + hand-crafted); H&E sets growth regime, not fine composition |
 | **ABM initial conditions** | Per-tumor PhysiCell parameters from composition + proliferation + anaplasia |
-| Reproducible repo | Pinned env, numbered scripts, config-driven paths, DeLong/permutation/Firth stats, unit tests |
+| **Coupled levers (Phase C)** | 4 FDR-robust couplings (prolif⊣crowding, blastemal⊣EMT, Wnt→EMT, p53→crowding) → bounded, correlated ranges for the PhysiCell virtual-cohort sweep |
+| **Bulk vs spatial (Phase C)** | Bulk recovers proliferation–crowding + program expression; EMT couplings and cell-type fractions need spatial resolution |
+| **Survival (Phase C)** | TARGET-WT OS (n=125): 0/9 levers survive FDR; blastemal→worse / p53→better trends |
+| Reproducible repo | Pinned env, numbered scripts, config-driven paths, DeLong/permutation/Firth/bootstrap stats, unit tests |
 
 ---
 
@@ -337,6 +341,49 @@ The mapping encodes the measured biology rather than being fit to outcome: as a 
 proliferation multiplier averages **1.40 in relapse vs 0.98 in non-relapse** (left panel). This
 gives PhysiCell spatially-resolved, biologically-grounded starting conditions per tumor rather than
 a uniform configuration. Running the simulation itself requires the PhysiCell binary (cluster).
+
+---
+
+## Phase C — Coupled levers & resolution-bounded seeding
+
+Phase A/B produce per-tumor point estimates; the ABM instead needs **rules** (which intrinsic
+programs move which microenvironment axes) plus **bounded, correlated ranges** to sweep — not a
+single "best" parameter set. Phase C builds that coupled prior from the omics, tests whether cheap
+**bulk** RNA-seq can replace expensive spatial resolution, and characterises the tumor **shapes** to
+seed. Every lever uses a **disjoint** gene panel ([`config/levers.yaml`](config/levers.yaml),
+machine-checked by [`coupling_geneset_audit.py`](phase1_mechanotypes/coupling_geneset_audit.py)) so
+couplings are biological, not gene-sharing artifacts.
+
+### Methodology
+- **Levers & axes** — 6 intrinsic levers (proliferation, p53-target, canonical-Wnt, blastemal-
+  nephrogenic, IGF, EMT) + 2 extrinsic axes (crowding, hypoxia), scored per cell and per tumor.
+- **Coupling network** — tumor-level **partial** correlations with bootstrap CIs + BH-FDR
+  (`coupling_core.R`, shared `couplings_lib.R`); cell-level run as a secondary check.
+- **Bifurcation** — bimodality coefficient + 2-component GMM/BIC per lever (`19_bifurcation_transfer.R`).
+- **Transfer** — standardized `axis ~ levers` regressions with bootstrap CIs → `config/joint_priors.yaml`.
+- **Bulk resolution ladder** — the *same* network on bulk RNA-seq (`20_bulk_coupling.R`) + NNLS
+  reference deconvolution (`25_bulk_deconv.R`) vs the paired single-cell composition.
+- **Cohort-wide FDR** — `23_global_fdr.R` pools all 68 tests across families (no cherry-picking).
+- **Survival** — TARGET-WT **open** GDC data (`target_wt_pull.py`), OS Cox on binary levers (`27_...R`).
+- **Architecture** — Visium compartment maps → nodule geometry / spatial autocorrelation (`26_tissue_architecture.py`).
+- **Seeding sweep** — `05_uq.py --mode virtual_cohort` draws correlated synthetic tumors from the prior.
+
+### Phase C results
+
+| Finding | Result |
+|---------|--------|
+| **Coupled levers** | 4 couplings survive BH-FDR **and** cohort-wide global FDR: proliferation⊣crowding (−0.60), blastemal⊣EMT (−0.59), Wnt→EMT (+0.53), p53→crowding (+0.35) |
+| **Couplings are between-tumor** | Cell-level partial network is near-null (\|r\|<0.05) → the seeding Σ is built at the tumor level (corrects a within-cell assumption) |
+| **Intrinsic → extrinsic rules** | crowding ← proliferation (−0.60) / p53 (+0.39); hypoxia ← p53 (+0.29); others n.s. — supersede the hand-set `k` scalars |
+| **Sensitive vs expressive** | Aggressive tumors (hi-prolif / lo-p53) have crowding **−0.57 vs +0.96** in restrained (p=0.006, Cliff's δ=−0.75) |
+| **Bifurcation** | Only **proliferation** splits the cohort into two modes; others unimodal |
+| **Bulk ↔ spatial** | Bulk recovers proliferation⊣crowding; **needs cell resolution** for the EMT couplings (can't tumor-scope EMT) and **invents** composition artifacts. Program expression transfers (r 0.7–0.8); cell-type *fractions* do not (NNLS CCC 0.18–0.48, stromal-biased) |
+| **Survival (TARGET-WT OS, 125 RNA / 38 MAF)** | 0/9 levers survive BH-FDR; coherent *trends*: blastemal → worse (HR 1.5), p53-activity → better (HR 0.63), mutations underpowered |
+| **Architecture** | Tumor shapes span nodular ↔ diffuse (blastemal spatial autocorrelation) → per-tumor ABM initial geometry |
+| **Deliverable** | [`config/joint_priors.yaml`](config/joint_priors.yaml): bounded lever ranges + couplings + transfer → a correlated PhysiCell **virtual-cohort** sweep |
+
+The two figure sets live in [`results/figures/couplings/`](results/figures/couplings/) — a 7-panel
+dashboard plus survival, parameter ranges, tissue maps, and the lever heatmap.
 
 ---
 
@@ -368,8 +415,15 @@ scripts\run_figures.bat
 | [`abm_parameters.png`](results/figures/abm_parameters.png) | ABM proliferation multiplier by relapse + per-tumor initial fractions |
 | [`regressive_pilot_summary.png`](results/figures/regressive_pilot_summary.png) | Regressive extension: ratio by treatment + tumor-level H&E→necrosis (r) + per-spot readout |
 | [`regressive_pilot_spatialmaps.png`](results/figures/regressive_pilot_spatialmaps.png) | Regressive extension: spatial maps of regressive (red) vs viable (blue) tissue |
+| [`couplings/dashboard.png`](results/figures/couplings/dashboard.png) | Phase C dashboard: coupling network, correlation heatmap, transfer forest, bifurcation, virtual cohort, bulk-vs-spatial recovery, architecture |
+| [`couplings/sensitive_expressive.png`](results/figures/couplings/sensitive_expressive.png) | Intrinsic (prolif/p53) → sensitive/expressive classes → conditional extrinsic axes (tumor + cell level) |
+| [`couplings/survival.png`](results/figures/couplings/survival.png) | TARGET-WT OS: Kaplan–Meier (blastemal, p53) + hazard-ratio forest of all 9 levers |
+| [`couplings/virtual_cohort_ranges.png`](results/figures/couplings/virtual_cohort_ranges.png) | The bounded PhysiCell parameter ranges the sensitivity sweep samples (median + p5–p95) |
+| [`couplings/tissue_maps.png`](results/figures/couplings/tissue_maps.png) | Real Visium compartment maps: nodular vs diffuse blastemal → ABM seeding geometry |
+| [`couplings/lever_heatmap.png`](results/figures/couplings/lever_heatmap.png) | 40 tumors × 8 levers, ward-clustered, annotated by favorable/anaplastic |
 
 Phase A/B figures regenerate with `08_figures.R` + `python phase2_histology_ml/18_result_figures.py`.
+Phase C figures regenerate with `python phase1_mechanotypes/{21_coupling_figures,28_more_figures}.py`.
 Segmentation overlays: `data/processed/nuclei/overlays/`
 
 ---
@@ -439,17 +493,20 @@ scripts\rscript.bat -e "testthat::test_dir('tests', filter = 'phase1')"
 
 ```
 sc-wilms-data/
-├── config/                  # paths.yaml, features.yaml, phase_b.yaml, physicell.yaml
-├── phase1_mechanotypes/     # R: 00–16 numbered scripts (mechanotype, composition, DE, GSEA, prognostics)
-├── phase2_histology_ml/     # Python: 00–25 numbered scripts (tiles, embeddings, MIL, StarDist, ABM, figures; 19–25 = regressive-tissue pilot)
+├── config/                  # paths.yaml, features.yaml, phase_b.yaml, physicell.yaml, levers.yaml, joint_priors.yaml
+├── phase1_mechanotypes/     # R: 00–28 (mechanotype, DE, GSEA, prognostics; 18–28 + coupling_*/couplings_lib/target_wt_* = Phase C coupled levers)
+├── phase2_histology_ml/     # Python: 00–26 numbered scripts (tiles, embeddings, MIL, StarDist, ABM, figures; 19–25 = regressive pilot, 26 = tissue architecture)
+├── phase3_abm/              # Python: PhysiCell authoring (place agents, emit rules, build model, UQ sweep incl. virtual_cohort)
 ├── scripts/                 # ingest, run_phase_*.bat, fetch metadata
-├── data/raw/                # gitignored ScPCA downloads
+├── data/raw/                # gitignored ScPCA + TARGET-WT downloads
 ├── data/processed/          # gitignored intermediates (SCE, scores, tiles, nuclei, embeddings)
-├── results/
+├── results/                 # mostly gitignored (results/figures/ is tracked)
 │   ├── mechanotypes/        # composition, moderated DE, GSEA, prognostics CSVs; consensus RDS
 │   ├── classifier/          # histology AUC + MIL/StarDist JSON, deconv/composition JSON
-│   ├── figures/             # analysis figures (PNG)
-│   └── abm/                 # per-tumor PhysiCell parameters (YAML + CSV)
+│   ├── couplings/           # Phase C: coupling network, transfer, bifurcation, bulk/, survival, global FDR
+│   ├── spatial/             # Phase C: per-tumor tissue-architecture descriptors
+│   ├── figures/             # analysis figures (PNG; `couplings/` = Phase C)
+│   └── abm/                 # per-tumor PhysiCell parameters (YAML + CSV) + virtual_cohort/
 ├── tests/
 ├── PRD.md                   # requirements & acceptance criteria
 ├── AGENTS.md                # agent/human coding rules
@@ -466,6 +523,8 @@ sc-wilms-data/
 | `config/paths.yaml` | All relative paths (no hard-coded absolutes) |
 | `config/phase_b.yaml` | Visium tile size, library limits, segmentation, classifier |
 | `config/physicell.yaml` | ABM domain and cell-type parameter mapping |
+| `config/levers.yaml` | **Phase C** curated *disjoint* lever/axis gene panels (roles, `hippo_core`, EMT scope) |
+| `config/joint_priors.yaml` | **Phase C** auto-generated coupled prior (lever ranges + couplings + transfer) for the sweep |
 
 **Important:** Set `WILMS_DEMO=0` (or use `run_phase_b.bat`) for real Visium processing. `WILMS_DEMO=1` generates synthetic tiles for CI only.
 
@@ -489,9 +548,11 @@ ScPCA cohort to lift:
   Lifting it needs the raw WSIs + a gated pathology foundation model (**UNI2 / Virchow2 /
   Prov-GigaPath**) or **XMAG** (5×-native), gated on an HF access token.
 - **Time-to-event survival.** Local metadata is **binary** (`relapse_status`) with too few deaths
-  (`vital_status`, n=5) for Cox / Kaplan-Meier. Proper recurrence-free-survival validation of the
-  proliferation signature needs **TARGET-WT** (GDC) or GSE31403/GSE10320, plus a **Scissor**
-  reproduction of the relapse-cell analysis.
+  (`vital_status`, n=5) for Cox / Kaplan-Meier. **Now done (Phase C):** the **open-access**
+  **TARGET-WT** GDC cohort (125 RNA / 38 MAF cases, 113 OS events) was pulled and OS Cox run on the
+  intrinsic levers — **0/9 survive BH-FDR**, with coherent trends (blastemal → worse HR 1.5,
+  p53-activity → better HR 0.63). The raw dbGaP sequencing remains credential-gated but was not
+  needed. Remaining external lift: a **Scissor** reproduction of the relapse-cell analysis.
 
 ### Status against the project goal
 
@@ -504,13 +565,19 @@ ScPCA cohort to lift:
   3-compartment composition (cross-tumor *r*≈0). H&E therefore sets the tumor's **growth regime**;
   fine composition comes from transcriptomic deconvolution. The ~0.73 is resolution-bound (above).
 - **(3) — yes, as a mapping.** Per-tumor PhysiCell parameters are generated and pass a directional
-  sanity check. What remains is **running PhysiCell itself** (the binary, on a cluster) and ideally
-  cross-cohort survival validation (Tier-3).
+  sanity check. What remains is **running PhysiCell itself** (the binary, on a cluster).
+- **Can we seed with *coupled rules and bounded ranges* rather than best-fit params, and how far
+  does cheap bulk get us? (Phase C)** Yes: 4 FDR-robust couplings + measured intrinsic→extrinsic
+  transfer become a coupled prior (`joint_priors.yaml`) driving a correlated virtual-cohort sweep.
+  Bulk recovers the proliferation–crowding backbone and program expression (r 0.7–0.8) but **needs
+  spatial/single-cell** for the EMT couplings and for cell-type fractions — a clean bound on what
+  resolution buys. Survival adds trends but no FDR hits.
 
 **Bottom line:** the analysis half of the project is *complete and honestly characterized* for this
-cohort — every locally-answerable question has an answer with effect sizes, CIs, and stated nulls.
-The two open ends are **external** (higher-resolution histology; time-to-event survival) and the
-**downstream PhysiCell simulation**, none of which are blocked by missing analysis code.
+cohort — every locally-answerable question has an answer with effect sizes, CIs, and stated nulls,
+now including the coupled-lever prior, the bulk-vs-spatial bound, and TARGET-WT survival. The one
+open end is the **downstream PhysiCell simulation** (the binary, on a cluster) — not blocked by
+missing analysis code.
 
 ---
 

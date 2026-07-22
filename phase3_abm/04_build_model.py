@@ -60,6 +60,93 @@ def _secretion_block(ph, rates, substrates, o2_uptake=O2_UPTAKE):
         one("ECM", rates.get("ecm_secretion_rate", 0.0), 0.0)
 
 
+def _write_cell_def(defs, name, idx, rates, substrates, o2_uptake=O2_UPTAKE, motile=True):
+    """One complete <cell_definition> — mirrors the PhysiCell template phenotype schema so the
+    type registers and cells.csv can reference it by name. Cycle is the Live model (code 5):
+    a single phase whose 0->0 transition rate is the (omics-determined) proliferation rate."""
+    cd = _sub(defs, "cell_definition", name=name, ID=str(idx))
+    ph = _sub(cd, "phenotype")
+
+    cyc = _sub(ph, "cycle", code="5", name="Live")
+    _sub(_sub(cyc, "phase_transition_rates", units="1/min"), "rate",
+         rates.get("proliferation_rate", 0.0), start_index="0", end_index="0", fixed_duration="false")
+
+    death = _sub(ph, "death")
+    apo = _sub(death, "model", code="100", name="apoptosis")
+    _sub(apo, "death_rate", rates.get("apoptosis_rate", 0.0), units="1/min")
+    _sub(_sub(apo, "phase_durations", units="min"), "duration", 516, index="0", fixed_duration="true")
+    ap = _sub(apo, "parameters")
+    for tag, val in [("unlysed_fluid_change_rate", 0.05), ("lysed_fluid_change_rate", 0),
+                     ("cytoplasmic_biomass_change_rate", 1.66667e-02),
+                     ("nuclear_biomass_change_rate", 5.83333e-03), ("calcification_rate", 0)]:
+        _sub(ap, tag, val, units="1/min")
+    _sub(ap, "relative_rupture_volume", 2.0, units="dimensionless")
+    nec = _sub(death, "model", code="101", name="necrosis")
+    _sub(nec, "death_rate", 0.0, units="1/min")
+    npd = _sub(nec, "phase_durations", units="min")
+    _sub(npd, "duration", 0, index="0", fixed_duration="true")
+    _sub(npd, "duration", 86400, index="1", fixed_duration="true")
+    npar = _sub(nec, "parameters")
+    for tag, val in [("unlysed_fluid_change_rate", 1.11667e-2), ("lysed_fluid_change_rate", 8.33333e-4),
+                     ("cytoplasmic_biomass_change_rate", 5.33333e-5),
+                     ("nuclear_biomass_change_rate", 2.16667e-3), ("calcification_rate", 0)]:
+        _sub(npar, tag, val, units="1/min")
+    _sub(npar, "relative_rupture_volume", 2.0, units="dimensionless")
+
+    vol = _sub(ph, "volume")
+    for tag, val, u in [("total", 2494, "micron^3"), ("fluid_fraction", 0.75, "dimensionless"),
+                        ("nuclear", 540, "micron^3"), ("fluid_change_rate", 0.05, "1/min"),
+                        ("cytoplasmic_biomass_change_rate", 0.0045, "1/min"),
+                        ("nuclear_biomass_change_rate", 0.0055, "1/min"),
+                        ("calcified_fraction", 0, "dimensionless"), ("calcification_rate", 0, "1/min"),
+                        ("relative_rupture_volume", 2.0, "dimensionless")]:
+        _sub(vol, tag, val, units=u)
+
+    mech = _sub(ph, "mechanics")
+    _sub(mech, "cell_cell_adhesion_strength", rates.get("adhesion_strength", 0.4), units="micron/min")
+    _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
+    _sub(mech, "relative_maximum_adhesion_distance", 1.25, units="dimensionless")
+    _sub(_sub(mech, "cell_adhesion_affinities"), "cell_adhesion_affinity", 1, name="default")
+    mopt = _sub(mech, "options")
+    _sub(mopt, "set_relative_equilibrium_distance", 1.8, enabled="false", units="dimensionless")
+    _sub(mopt, "set_absolute_equilibrium_distance", 15.12, enabled="false", units="micron")
+    _sub(mech, "attachment_elastic_constant", 0.01, units="1/min")
+    _sub(mech, "attachment_rate", 0.0, units="1/min")
+    _sub(mech, "detachment_rate", 0.0, units="1/min")
+    _sub(mech, "maximum_number_of_attachments", 12)
+
+    mot = _sub(ph, "motility")
+    _sub(mot, "speed", rates.get("migration_speed", 0.3) if motile else 0.0, units="micron/min")
+    _sub(mot, "persistence_time", 1.0, units="min")
+    _sub(mot, "migration_bias", 0.5 if motile else 0.0, units="dimensionless")
+    mo = _sub(mot, "options")
+    _sub(mo, "enabled", "true" if motile else "false"); _sub(mo, "use_2D", "true")
+    chem = _sub(mo, "chemotaxis")
+    _sub(chem, "enabled", "false"); _sub(chem, "substrate", "oxygen"); _sub(chem, "direction", 1)
+    ach = _sub(mo, "advanced_chemotaxis")
+    _sub(ach, "enabled", "false"); _sub(ach, "normalize_each_gradient", "false")
+    _sub(_sub(ach, "chemotactic_sensitivities"), "chemotactic_sensitivity", 0.0, substrate="oxygen")
+
+    _secretion_block(ph, rates, substrates, o2_uptake=o2_uptake)
+
+    ci = _sub(ph, "cell_interactions")
+    _sub(ci, "apoptotic_phagocytosis_rate", 0, units="1/min")
+    _sub(ci, "necrotic_phagocytosis_rate", 0, units="1/min")
+    _sub(ci, "other_dead_phagocytosis_rate", 0, units="1/min")
+    _sub(_sub(ci, "live_phagocytosis_rates"), "phagocytosis_rate", 0, name="default", units="1/min")
+    _sub(_sub(ci, "attack_rates"), "attack_rate", 0, name="default", units="1/min")
+    _sub(ci, "attack_damage_rate", 1, units="1/min")
+    _sub(ci, "attack_duration", 0.1, units="min")
+    _sub(_sub(ci, "fusion_rates"), "fusion_rate", 0, name="default", units="1/min")
+    ct = _sub(ph, "cell_transformations")
+    _sub(_sub(ct, "transformation_rates"), "transformation_rate", 0, name="default", units="1/min")
+    cint = _sub(ph, "cell_integrity")
+    _sub(cint, "damage_rate", 0.0, units="1/min"); _sub(cint, "damage_repair_rate", 0.0, units="1/min")
+
+    _sub(_sub(cd, "custom_data"), "sample", 1.0, conserved="false", units="dimensionless")
+    return cd
+
+
 def build_xml(sample_id, tumor, dom, sim, substrates=None, include_necrotic=False) -> ET.Element:
     substrates = substrates or {}
     root = ET.Element("PhysiCell_settings", version="devel-metadata")
@@ -74,11 +161,19 @@ def build_xml(sample_id, tumor, dom, sim, substrates=None, include_necrotic=Fals
     ov = _sub(root, "overall")
     _sub(ov, "max_time", sim["max_time_min"], units="min")
     _sub(ov, "time_units", "min"); _sub(ov, "space_units", "micron")
+    _sub(ov, "dt_diffusion", 0.01, units="min")       # PhysiCell RNG/solver setup needs these
+    _sub(ov, "dt_mechanics", 0.1, units="min")
+    _sub(ov, "dt_phenotype", 6, units="min")
+
+    par = _sub(root, "parallel")                      # required: setup_rng() sizes per-thread RNG
+    _sub(par, "omp_num_threads", 4)
 
     save = _sub(root, "save")
     _sub(save, "folder", "output")
-    fd = _sub(save, "full_data"); _sub(fd, "interval", sim["save_interval_min"], units="min")
-    sd = _sub(save, "SVG"); _sub(sd, "interval", sim["save_interval_min"], units="min")
+    fd = _sub(save, "full_data")
+    _sub(fd, "interval", sim["save_interval_min"], units="min"); _sub(fd, "enable", "true")
+    sd = _sub(save, "SVG")
+    _sub(sd, "interval", sim["save_interval_min"], units="min"); _sub(sd, "enable", "true")
 
     me = _sub(root, "microenvironment_setup")
     o2 = _sub(me, "variable", name="oxygen", units="mmHg", ID="0")
@@ -99,54 +194,19 @@ def build_xml(sample_id, tumor, dom, sim, substrates=None, include_necrotic=Fals
              units="dimensionless", enabled="true" if spec.get("dirichlet") else "false")
 
     defs = _sub(root, "cell_definitions")
-    for i, ct in enumerate(COMPARTMENTS):
-        rates = tumor["cell_types"][ct]
-        cd = _sub(defs, "cell_definition", name=ct, ID=str(i))
-        ph = _sub(cd, "phenotype")
-        cyc = _sub(ph, "cycle", model="live", code="6")
-        rates_el = _sub(cyc, "phase_transition_rates", units="1/min")
-        _sub(rates_el, "rate", rates["proliferation_rate"], start_index="0", end_index="0",
-             fixed_duration="false")
-        death = _sub(ph, "death")
-        apo = _sub(death, "model", name="apoptosis", code="100")
-        _sub(apo, "death_rate", rates["apoptosis_rate"], units="1/min")
-        nec = _sub(death, "model", name="necrosis", code="101")
-        _sub(nec, "death_rate", 0.0, units="1/min")
-        mech = _sub(ph, "mechanics")
-        _sub(mech, "cell_cell_adhesion_strength", rates.get("adhesion_strength", 0.4),
-             units="micron/min")
-        _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
-        # motility: per-tumor migration speed (EMT-scaled in 17_positives_to_abm.py)
-        mot = _sub(ph, "motility")
-        _sub(mot, "speed", rates.get("migration_speed", 0.3), units="micron/min")
-        _sub(mot, "persistence_time", 1.0, units="min")
-        _sub(mot, "migration_bias", 0.5, units="dimensionless")
-        mot_opt = _sub(mot, "options")
-        _sub(mot_opt, "enabled", "true")
-        _sub(mot_opt, "use_2D", "true")
-        _secretion_block(ph, rates, substrates)
-
+    # PhysiCell requires a 'default' cell_definition as ID 0 (initialize_cell_definitions_from_
+    # _pugixml sets cell_defaults from it); our compartments follow and are referenced by NAME
+    # from cells.csv. Without 'default' the named types don't register and every agent is skipped.
+    _write_cell_def(defs, "default", 0, {"proliferation_rate": 0.0, "apoptosis_rate": 0.0}, substrates)
+    idx = 1
+    for ct in COMPARTMENTS:
+        _write_cell_def(defs, ct, idx, tumor["cell_types"][ct], substrates)
+        idx += 1
     if include_necrotic:
-        # inert necrotic tissue (seeded at high-mito spots): no cycle/death/motility/uptake —
-        # a space-filling dead-tissue scaffold, gets no grammar rules.
-        cd = _sub(defs, "cell_definition", name="necrotic", ID=str(len(COMPARTMENTS)))
-        ph = _sub(cd, "phenotype")
-        cyc = _sub(ph, "cycle", model="live", code="6")
-        _sub(_sub(cyc, "phase_transition_rates", units="1/min"), "rate", 0.0,
-             start_index="0", end_index="0", fixed_duration="false")
-        death = _sub(ph, "death")
-        _sub(_sub(death, "model", name="apoptosis", code="100"), "death_rate", 0.0, units="1/min")
-        _sub(_sub(death, "model", name="necrosis", code="101"), "death_rate", 0.0, units="1/min")
-        mech = _sub(ph, "mechanics")
-        _sub(mech, "cell_cell_adhesion_strength", 0.1, units="micron/min")
-        _sub(mech, "cell_cell_repulsion_strength", 10.0, units="micron/min")
-        mot = _sub(ph, "motility")
-        _sub(mot, "speed", 0.0, units="micron/min")
-        _sub(mot, "persistence_time", 1.0, units="min")
-        _sub(mot, "migration_bias", 0.0, units="dimensionless")
-        mo = _sub(mot, "options"); _sub(mo, "enabled", "false"); _sub(mo, "use_2D", "true")
-        _secretion_block(ph, {"igf_uptake_rate": 0.0, "ecm_secretion_rate": 0.0},
-                         substrates, o2_uptake=0.0)     # dead: no uptake/secretion
+        # inert necrotic tissue (seeded at high-mito spots): no cycle/death/motility/uptake.
+        _write_cell_def(defs, "necrotic", idx,
+                        {"adhesion_strength": 0.1, "igf_uptake_rate": 0.0, "ecm_secretion_rate": 0.0},
+                        substrates, o2_uptake=0.0, motile=False)
 
     rules = _sub(root, "cell_rules")
     rs = _sub(rules, "rulesets")
@@ -159,8 +219,13 @@ def build_xml(sample_id, tumor, dom, sim, substrates=None, include_necrotic=Fals
 
     opt = _sub(root, "options")
     _sub(opt, "virtual_wall_at_domain_edge", "true")
+    _sub(opt, "random_seed", 0)                        # inside <options>; 06_run_cohort seds per replicate
 
     ur = _sub(root, "user_parameters")
+    # PhysiCell sample projects' setup_tissue() reads number_of_cells for demo placement;
+    # 0 => place nothing procedurally and load the real agents from cells.csv instead.
+    _sub(ur, "number_of_cells", 0, type="int", units="none",
+         description="demo placement count; 0 = load initial cells from cells.csv only")
     _sub(ur, "sample_id", sample_id)
     _sub(ur, "high_grade_regime", str(tumor.get("high_grade_regime", False)).lower())
     return root
@@ -203,13 +268,14 @@ def main() -> None:
             print(f"[skip] {run_id}: missing tumor params / cells.csv / rules.csv")
             continue
         if run_d != rules_src.parent:                    # patch dir needs its own rules.csv
-            (run_d / "rules.csv").write_text(rules_src.read_text())
+            (run_d / "rules.csv").write_bytes(rules_src.read_bytes())   # preserve \n endings
         cells = pd.read_csv(cells_csv)
         dom = {"x_max": round(cells["x"].max() + margin, 1),
                "y_max": round(cells["y"].max() + margin, 1)}
         root = build_xml(run_id, tumor, dom, sim, substrates, include_necrotic)
         xml = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
-        (run_d / "PhysiCell_settings.xml").write_text(xml)
+        (run_d / "PhysiCell_settings.xml").write_bytes(
+            xml.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8"))    # \n for Linux
         prov = {"run_id": run_id, "sample_id": sid, "seed": cfg["phase_c"]["seed"],
                 "n_agents": int(len(cells)), "domain_um": dom,
                 "high_grade_regime": bool(tumor.get("high_grade_regime", False)),

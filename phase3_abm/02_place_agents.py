@@ -116,6 +116,12 @@ def _place_from_spots(cfg, s, rng) -> pd.DataFrame:
     return pd.DataFrame(rec, columns=["x", "y", "cell_type"])
 
 
+def _write_csv_lf(path, df) -> None:
+    """Write a CSV with Unix (\\n) line endings even on Windows — PhysiCell (Linux) reads the
+    last field literally, so a trailing \\r makes every cell type 'stromal\\r' unrecognised."""
+    path.write_bytes(df.to_csv(index=False).replace("\r\n", "\n").replace("\r", "\n").encode("utf-8"))
+
+
 def _recentre(cells: pd.DataFrame, margin: float, z: float) -> pd.DataFrame:
     cells = cells.copy()
     cells["x"] = cells["x"] - cells["x"].min() + margin
@@ -230,7 +236,7 @@ def main() -> None:
                 continue
             for k, (cx, cy), cells in patches:
                 run_id = f"{sid}__p{k}"
-                (ensure_dir(out_dir / run_id) / "cells.csv").write_text(cells.to_csv(index=False))
+                _write_csv_lf(ensure_dir(out_dir / run_id) / "cells.csv", cells)
                 patch_rows.append(_summary_row(run_id, sid, cells, patch_id=k,
                                                 center_x_um=round(cx, 1), center_y_um=round(cy, 1)))
                 print(f"[ok] {run_id}: {len(cells)} agents")
@@ -239,7 +245,7 @@ def main() -> None:
             if cells is None or cells.empty:
                 print(f"[skip] {sid}: no placeable spots")
                 continue
-            (ensure_dir(out_dir / sid) / "cells.csv").write_text(cells.to_csv(index=False))
+            _write_csv_lf(ensure_dir(out_dir / sid) / "cells.csv", cells)
             summ.append(_summary_row(sid, sid, cells))
             print(f"[ok] {sid}: {len(cells)} agents")
 

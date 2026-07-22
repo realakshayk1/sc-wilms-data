@@ -50,16 +50,38 @@ def fig_phase_a(cfg, figdir):
     ax1.set_xlim(g["NES"].min() - 1.4, g["NES"].max() + 1.4)
 
     # --- (b) moderated-DE FDR<0.05 gene counts per contrast ---
+    # limma-voom is the PRIMARY (conservative) series; edgeR-QLF is greyed context (it is
+    # anti-conservative at this small n — the two diverge, esp. for the relapse contrasts where
+    # voom -> ~0 genes, i.e. the relapse signal is pathway-level (GSEA), not individual-gene).
+    from matplotlib.patches import ConnectionPatch, Rectangle
     de = de.copy()
     de["label"] = de["scope"] + "\n" + de["contrast"].str.replace("_vs_", " v ").str.replace("_", " ")
-    de = de.sort_values("edgeR_fdr05", ascending=True)
+    de = de.sort_values("edgeR_fdr05", ascending=True).reset_index(drop=True)
     y = np.arange(len(de)); h = 0.38
-    ax2.barh(y + h / 2, de["edgeR_fdr05"], h, color=C_UP, alpha=0.9, label="edgeR-QLF")
-    ax2.barh(y - h / 2, de["voom_fdr05"], h, color=C_DN, alpha=0.7, label="limma-voom")
+    ax2.barh(y + h / 2, de["edgeR_fdr05"], h, color=C_REF, alpha=0.35, hatch="///",
+             label="edgeR-QLF (context)")
+    ax2.barh(y - h / 2, de["voom_fdr05"], h, color=C_DN, alpha=0.95, label="limma-voom (primary)")
     ax2.set_yticks(y); ax2.set_yticklabels(de["label"], fontsize=7.8)
     ax2.set_xlabel("genes at FDR < 0.05")
-    ax2.set_title("Moderated pseudobulk DE\n(genes at FDR < 0.05)", fontsize=10.5, loc="left")
-    ax2.legend(fontsize=8, loc="lower right", frameon=False)
+    ax2.set_title("Moderated pseudobulk DE\n(limma-voom primary · edgeR greyed)", fontsize=10.5, loc="left")
+    ax2.legend(fontsize=7.5, loc="lower right", frameon=False)
+
+    # box the overall relapse contrast and connect it to the GSEA panel that deep-dives it
+    rel = de.index[(de["scope"] == "overall") & (de["contrast"] == "relapse_vs_norelapse")]
+    if len(rel):
+        ri = int(rel[0])
+        xmax = max(int(de.loc[ri, "edgeR_fdr05"]), int(de.loc[ri, "voom_fdr05"]), 1)
+        ax2.add_patch(Rectangle((-0.5, ri - 0.5), xmax + 3.5, 1.0, fill=False,
+                                edgecolor=C_UP, lw=1.8, zorder=5))
+        ax2.annotate("relapse contrast\n→ GSEA deep-dive", (xmax, ri), xytext=(6, 0),
+                     textcoords="offset points", va="center", fontsize=7, color=C_UP)
+        con = ConnectionPatch(xyA=(-0.5, ri), coordsA=ax2.transData,
+                              xyB=(0.0, (len(g) - 1) / 2.0), coordsB=ax1.transData,
+                              arrowstyle="-|>", color=C_UP, lw=1.6, alpha=0.8, zorder=6)
+        fig.add_artist(con)
+    fig.text(0.5, -0.02, "Hallmark GSEA (left) is the pathway-level deep-dive into the boxed "
+             "relapse contrast (right); under limma-voom that contrast has ~0 single-gene hits.",
+             ha="center", fontsize=8, color="#444")
     fig.tight_layout()
     out = figdir / "phase_a_gsea_de.png"; fig.savefig(out); plt.close(fig)
     return out
