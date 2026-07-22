@@ -27,7 +27,12 @@ plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.rig
 C_UP, C_DN, C_EMB, C_MORPH, C_REF = "#c0392b", "#2471a3", "#1f7a4d", "#b9770e", "#7f8c8d"
 
 
-def fig_phase_a(cfg, figdir):
+def fig_phase_a(cfg, figdir, method="voom"):
+    # method = "voom" (limma-voom, reported) or "edger" (edgeR-QLF). limma-voom is preferred at this
+    # ~40-sample pseudobulk scale: it is well-calibrated, whereas edgeR-QLF is anti-conservative here
+    # (the ~30x gap, e.g. 130 vs 4 genes for the same contrast, is inflation, not sensitivity —
+    # cf. Squair et al. 2021, muscat). Under voom the relapse contrasts -> ~0 genes, so the relapse
+    # signal is pathway-level (GSEA). Pass method="edger" to render the edgeR-QLF version instead.
     gs = pd.read_csv(resolve_path(cfg, "results/mechanotypes/hallmark_gsea.csv"))
     de = pd.read_csv(resolve_path(cfg, "results/mechanotypes/moderated_de_summary.csv"))
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5.2), gridspec_kw={"width_ratios": [1.35, 1]})
@@ -49,39 +54,39 @@ def fig_phase_a(cfg, figdir):
                   fontsize=10.5, loc="left")
     ax1.set_xlim(g["NES"].min() - 1.4, g["NES"].max() + 1.4)
 
-    # --- (b) moderated-DE FDR<0.05 gene counts per contrast ---
-    # limma-voom is the PRIMARY (conservative) series; edgeR-QLF is greyed context (it is
-    # anti-conservative at this small n — the two diverge, esp. for the relapse contrasts where
-    # voom -> ~0 genes, i.e. the relapse signal is pathway-level (GSEA), not individual-gene).
+    # --- (b) moderated-DE FDR<0.05 gene counts per contrast (single method) ---
     from matplotlib.patches import ConnectionPatch, Rectangle
+    col = "voom_fdr05" if method == "voom" else "edgeR_fdr05"
+    mname = "limma-voom" if method == "voom" else "edgeR-QLF"
     de = de.copy()
     de["label"] = de["scope"] + "\n" + de["contrast"].str.replace("_vs_", " v ").str.replace("_", " ")
-    de = de.sort_values("edgeR_fdr05", ascending=True).reset_index(drop=True)
-    y = np.arange(len(de)); h = 0.38
-    ax2.barh(y + h / 2, de["edgeR_fdr05"], h, color=C_REF, alpha=0.35, hatch="///",
-             label="edgeR-QLF (context)")
-    ax2.barh(y - h / 2, de["voom_fdr05"], h, color=C_DN, alpha=0.95, label="limma-voom (primary)")
+    de = de.sort_values(col, ascending=True).reset_index(drop=True)
+    y = np.arange(len(de))
+    ax2.barh(y, de[col], 0.62, color=C_DN, alpha=0.95)
     ax2.set_yticks(y); ax2.set_yticklabels(de["label"], fontsize=7.8)
     ax2.set_xlabel("genes at FDR < 0.05")
-    ax2.set_title("Moderated pseudobulk DE\n(limma-voom primary · edgeR greyed)", fontsize=10.5, loc="left")
-    ax2.legend(fontsize=7.5, loc="lower right", frameon=False)
+    ax2.set_title(f"Moderated pseudobulk DE\n({mname}, FDR < 0.05)", fontsize=10.5, loc="left")
 
     # box the overall relapse contrast and connect it to the GSEA panel that deep-dives it
     rel = de.index[(de["scope"] == "overall") & (de["contrast"] == "relapse_vs_norelapse")]
     if len(rel):
-        ri = int(rel[0])
-        xmax = max(int(de.loc[ri, "edgeR_fdr05"]), int(de.loc[ri, "voom_fdr05"]), 1)
-        ax2.add_patch(Rectangle((-0.5, ri - 0.5), xmax + 3.5, 1.0, fill=False,
+        ri = int(rel[0]); nrel = int(de.loc[ri, col])
+        xmax = max(nrel, 1)
+        ax2.add_patch(Rectangle((-0.5, ri - 0.5), xmax + 3.0, 1.0, fill=False,
                                 edgecolor=C_UP, lw=1.8, zorder=5))
-        ax2.annotate("relapse contrast\n→ GSEA deep-dive", (xmax, ri), xytext=(6, 0),
-                     textcoords="offset points", va="center", fontsize=7, color=C_UP)
+        ax2.annotate(f"relapse contrast\n→ GSEA deep-dive ({nrel} gene{'s' if nrel != 1 else ''})",
+                     (xmax, ri), xytext=(6, 0), textcoords="offset points", va="center",
+                     fontsize=7, color=C_UP)
         con = ConnectionPatch(xyA=(-0.5, ri), coordsA=ax2.transData,
                               xyB=(0.0, (len(g) - 1) / 2.0), coordsB=ax1.transData,
                               arrowstyle="-|>", color=C_UP, lw=1.6, alpha=0.8, zorder=6)
         fig.add_artist(con)
-    fig.text(0.5, -0.02, "Hallmark GSEA (left) is the pathway-level deep-dive into the boxed "
-             "relapse contrast (right); under limma-voom that contrast has ~0 single-gene hits.",
-             ha="center", fontsize=8, color="#444")
+        cap = (f"Hallmark GSEA (left) is the pathway-level deep-dive into the boxed relapse contrast "
+               f"(right), which has {nrel} single-gene hit{'s' if nrel != 1 else ''} at FDR<0.05 under "
+               f"{mname}" + (" — the relapse signal is pathway-level." if method == "voom" else "."))
+    else:
+        cap = f"Moderated pseudobulk DE ({mname})."
+    fig.text(0.5, -0.02, cap, ha="center", fontsize=8, color="#444")
     fig.tight_layout()
     out = figdir / "phase_a_gsea_de.png"; fig.savefig(out); plt.close(fig)
     return out
