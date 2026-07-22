@@ -99,8 +99,12 @@ def main() -> None:
             continue
         df = pd.DataFrame(rows)
         d = ensure_dir(out_dir / sid)
-        df[HEADER].to_csv(d / "rules.csv", index=False, header=False)
-        df.to_csv(d / "rules_annotated.csv", index=False)
+        # Unix (\n) line endings — PhysiCell (Linux) reads the last CSV field literally, so a
+        # Windows \r would corrupt e.g. the apply_to_dead flag / behavior name.
+        def _lf(text):
+            return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        (d / "rules.csv").write_bytes(_lf(df[HEADER].to_csv(index=False, header=False)))
+        (d / "rules_annotated.csv").write_bytes(_lf(df.to_csv(index=False)))
         n += 1
     print(f"[ok] grammar rules written for {n} tumors -> results/abm/<sample_id>/rules.csv")
 
