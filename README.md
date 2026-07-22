@@ -368,22 +368,77 @@ couplings are biological, not gene-sharing artifacts.
 - **Architecture** — Visium compartment maps → nodule geometry / spatial autocorrelation (`26_tissue_architecture.py`).
 - **Seeding sweep** — `05_uq.py --mode virtual_cohort` draws correlated synthetic tumors from the prior.
 
-### Phase C results
+### Phase C results — approaches in sequence
 
-| Finding | Result |
-|---------|--------|
-| **Coupled levers** | 4 couplings survive BH-FDR **and** cohort-wide global FDR: proliferation⊣crowding (−0.60), blastemal⊣EMT (−0.59), Wnt→EMT (+0.53), p53→crowding (+0.35) |
-| **Couplings are between-tumor** | Cell-level partial network is near-null (\|r\|<0.05) → the seeding Σ is built at the tumor level (corrects a within-cell assumption) |
-| **Intrinsic → extrinsic rules** | crowding ← proliferation (−0.60) / p53 (+0.39); hypoxia ← p53 (+0.29); others n.s. — supersede the hand-set `k` scalars |
-| **Sensitive vs expressive** | Aggressive tumors (hi-prolif / lo-p53) have crowding **−0.57 vs +0.96** in restrained (p=0.006, Cliff's δ=−0.75) |
-| **Bifurcation** | Only **proliferation** splits the cohort into two modes; others unimodal |
-| **Bulk ↔ spatial** | Bulk recovers proliferation⊣crowding; **needs cell resolution** for the EMT couplings (can't tumor-scope EMT) and **invents** composition artifacts. Program expression transfers (r 0.7–0.8); cell-type *fractions* do not (NNLS CCC 0.18–0.48, stromal-biased) |
-| **Survival (TARGET-WT OS, 125 RNA / 38 MAF)** | 0/9 levers survive BH-FDR; coherent *trends*: blastemal → worse (HR 1.5), p53-activity → better (HR 0.63), mutations underpowered |
-| **Architecture** | Tumor shapes span nodular ↔ diffuse (blastemal spatial autocorrelation) → per-tumor ABM initial geometry |
-| **Deliverable** | [`config/joint_priors.yaml`](config/joint_priors.yaml): bounded lever ranges + couplings + transfer → a correlated PhysiCell **virtual-cohort** sweep |
+![Phase C dashboard — coupling network, correlation heatmap, transfer forest, bifurcation, virtual cohort, bulk-vs-spatial recovery, architecture](results/figures/phase_c_dashboard.png)
 
-The two figure sets live in [`results/figures/couplings/`](results/figures/couplings/) — a 7-panel
-dashboard plus survival, parameter ranges, tissue maps, and the lever heatmap.
+**1 · Coupling network — which levers move together.** Tumor-level **partial** correlations (conditioning
+on all other levers) with bootstrap CIs and BH-FDR isolate *direct* associations. Four couplings survive
+FDR — **proliferation ⊣ crowding (−0.60)**, **blastemal ⊣ EMT (−0.59)**, **Wnt → EMT (+0.53)**,
+**p53 → crowding (+0.35)** — and all four also clear a **cohort-wide** global FDR pooling 68 tests across
+families (`23_global_fdr.R`). Partial correlation correctly *deflates* spurious marginal edges (e.g.
+proliferation↔IGF 0.69 → 0.38, n.s.). The hypothesised p53×EMT is **not** supported — p53 partners
+crowding, EMT partners Wnt/blastemal. The same network at the **cell** level is near-null (|r|<0.05), so
+the couplings are a **between-tumor** property and the seeding Σ is built at the tumor level.
+
+![Intrinsic → extrinsic transfer rules](results/figures/phase_c_forest.png)
+
+**2 · Intrinsic → extrinsic transfer.** Standardized `axis ~ levers` regressions (bootstrap CIs) give the
+seeding *rules*: **crowding ← proliferation (−0.60) / p53 (+0.39)** and **hypoxia ← p53 (+0.29)**; the
+other nine coefficients cross zero. These measured slopes supersede the hand-set `k` scalars in the
+per-tumor mapping.
+
+![Sensitive vs expressive — intrinsic state to extrinsic microenvironment](results/figures/phase_c_sensitive_expressive.png)
+
+**3 · Sensitive vs expressive.** Labelling tumors by intrinsic state — **expressive** (aggressive:
+hi-proliferation / lo-p53) vs **sensitive** (restrained) — the extrinsic axes separate as the transfer
+predicts: crowding **−0.57 in expressive vs +0.96 in sensitive** (Mann–Whitney p=0.006, Cliff's δ=−0.75);
+EMT does not differ (it is Wnt/blastemal-driven). The same split at the cell level is flat (δ=−0.12),
+reconfirming the between-tumor nature.
+
+![Bifurcation — only proliferation splits the cohort](results/figures/phase_c_bifurcation.png)
+
+**4 · Bifurcation.** Bimodality coefficient + 2-component GMM/BIC per lever: **only proliferation** splits
+the cohort into two modes (~16% high-proliferation); the rest are unimodal. The virtual-cohort draw uses
+each lever's *empirical* marginal, so this bimodality is honoured automatically.
+
+![Virtual-cohort PhysiCell parameter ranges — the deliverable](results/figures/phase_c_virtual_cohort_ranges.png)
+
+**5 · The deliverable — bounded, coupled ranges.** `05_uq.py --mode virtual_cohort` draws 256 correlated
+synthetic tumors from the prior (Gaussian copula on the levers' joint distribution) and pushes them
+through the transfer to PhysiCell parameters. The result is a **bounded range per parameter** (e.g.
+proliferation ×0.40–2.25, pressure→cycle half-max 0.71–1.49, O₂→necrosis 2.99–6.51) that *preserves the
+couplings* (drawn proliferation vs derived crowding r=−0.74) — the "ranges for sensitivity analysis," not
+a best-fit point.
+
+![What cell resolution buys — bulk vs spatial coupling recovery](results/figures/phase_c_coupling_recovery.png)
+
+**6 · Bulk vs spatial — can cheap data replace expensive resolution?** The *same* network on **bulk**
+RNA-seq (same 40 tumors): bulk **recovers** proliferation ⊣ crowding and program *expression* (concordance
+r 0.7–0.8), but the **EMT couplings need cell resolution** (bulk cannot tumor-scope EMT away from stromal
+VIM) and bulk **invents** composition-driven artifacts that within-cell partial correlation dissolves.
+NNLS deconvolution recovers the *ordering* of compartment fractions (r≈0.5) but is absolutely biased
+(Lin's CCC 0.18–0.48, stromal-overcalled) — so cell-type *fractions* are where spatial earns its keep.
+
+![TARGET-WT overall survival — KM + hazard-ratio forest](results/figures/phase_c_survival.png)
+
+**7 · Survival (lever validation, not prognosis).** The **open-access** TARGET-WT GDC cohort (125 RNA /
+38 MAF cases, 113 OS events) — pulled without dbGaP — gives OS Cox on the binary levers. **0/9 survive
+BH-FDR**, but the trends are biologically coherent: **blastemal → worse** (HR 1.5), **p53-activity →
+better** (HR 0.63), mutation levers underpowered. Per the no-fitting-to-outcome rule, survival is reported
+only; it never re-weights the sweep.
+
+![Real Visium compartment maps — nodular vs diffuse](results/figures/phase_c_tissue_maps.png)
+
+**8 · Histology → shape → seeding.** Visium compartment maps give per-tumor architecture (nodule geometry,
+spatial autocorrelation): tumors span **nodular** (blastemal in discrete territories) to **diffuse**
+(blastemal intermixed) at matched composition — the initial geometries to seed the ABM. A clustered
+[per-tumor lever heatmap](results/figures/phase_c_lever_heatmap.png) shows the intrinsic profiles do
+**not** cleanly separate favorable from anaplastic (consistent with the ~0.73-AUC ceiling) — an honest
+negative on "clustering by histology."
+
+**Deliverable:** [`config/joint_priors.yaml`](config/joint_priors.yaml) — bounded lever ranges + couplings
++ transfer, consumed by the correlated virtual-cohort sweep.
 
 ---
 
@@ -415,12 +470,14 @@ scripts\run_figures.bat
 | [`abm_parameters.png`](results/figures/abm_parameters.png) | ABM proliferation multiplier by relapse + per-tumor initial fractions |
 | [`regressive_pilot_summary.png`](results/figures/regressive_pilot_summary.png) | Regressive extension: ratio by treatment + tumor-level H&E→necrosis (r) + per-spot readout |
 | [`regressive_pilot_spatialmaps.png`](results/figures/regressive_pilot_spatialmaps.png) | Regressive extension: spatial maps of regressive (red) vs viable (blue) tissue |
-| [`couplings/dashboard.png`](results/figures/couplings/dashboard.png) | Phase C dashboard: coupling network, correlation heatmap, transfer forest, bifurcation, virtual cohort, bulk-vs-spatial recovery, architecture |
-| [`couplings/sensitive_expressive.png`](results/figures/couplings/sensitive_expressive.png) | Intrinsic (prolif/p53) → sensitive/expressive classes → conditional extrinsic axes (tumor + cell level) |
-| [`couplings/survival.png`](results/figures/couplings/survival.png) | TARGET-WT OS: Kaplan–Meier (blastemal, p53) + hazard-ratio forest of all 9 levers |
-| [`couplings/virtual_cohort_ranges.png`](results/figures/couplings/virtual_cohort_ranges.png) | The bounded PhysiCell parameter ranges the sensitivity sweep samples (median + p5–p95) |
-| [`couplings/tissue_maps.png`](results/figures/couplings/tissue_maps.png) | Real Visium compartment maps: nodular vs diffuse blastemal → ABM seeding geometry |
-| [`couplings/lever_heatmap.png`](results/figures/couplings/lever_heatmap.png) | 40 tumors × 8 levers, ward-clustered, annotated by favorable/anaplastic |
+| [`phase_c_dashboard.png`](results/figures/phase_c_dashboard.png) | Phase C dashboard: coupling network, correlation heatmap, transfer forest, bifurcation, virtual cohort, bulk-vs-spatial recovery, architecture (7 panels also saved standalone as `phase_c_network/heatmap/forest/…`) |
+| [`phase_c_forest.png`](results/figures/phase_c_forest.png) | Intrinsic → extrinsic transfer coefficients with bootstrap CIs |
+| [`phase_c_sensitive_expressive.png`](results/figures/phase_c_sensitive_expressive.png) | Intrinsic (prolif/p53) → sensitive/expressive classes → conditional extrinsic axes (tumor + cell level) |
+| [`phase_c_survival.png`](results/figures/phase_c_survival.png) | TARGET-WT OS: Kaplan–Meier (blastemal, p53) + hazard-ratio forest of all 9 levers |
+| [`phase_c_virtual_cohort_ranges.png`](results/figures/phase_c_virtual_cohort_ranges.png) | The bounded PhysiCell parameter ranges the sensitivity sweep samples (median + p5–p95) |
+| [`phase_c_tissue_maps.png`](results/figures/phase_c_tissue_maps.png) | Real Visium compartment maps: nodular vs diffuse blastemal → ABM seeding geometry |
+| [`phase_c_lever_heatmap.png`](results/figures/phase_c_lever_heatmap.png) | 40 tumors × 8 levers, ward-clustered, annotated by favorable/anaplastic |
+| [`phase_c_abm_*.png`](results/figures/) | ABM deck figures: placement, omics→params, half-max knob, cohort heatmap |
 
 Phase A/B figures regenerate with `08_figures.R` + `python phase2_histology_ml/18_result_figures.py`.
 Phase C figures regenerate with `python phase1_mechanotypes/{21_coupling_figures,28_more_figures}.py`.
@@ -505,7 +562,7 @@ sc-wilms-data/
 │   ├── classifier/          # histology AUC + MIL/StarDist JSON, deconv/composition JSON
 │   ├── couplings/           # Phase C: coupling network, transfer, bifurcation, bulk/, survival, global FDR
 │   ├── spatial/             # Phase C: per-tumor tissue-architecture descriptors
-│   ├── figures/             # analysis figures (PNG; `couplings/` = Phase C)
+│   ├── figures/             # analysis figures (PNG, flat; `phase_a_*` / `phase_b_*` / `phase_c_*`)
 │   └── abm/                 # per-tumor PhysiCell parameters (YAML + CSV) + virtual_cohort/
 ├── tests/
 ├── PRD.md                   # requirements & acceptance criteria

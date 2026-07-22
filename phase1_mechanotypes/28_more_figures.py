@@ -4,7 +4,7 @@
   virtual_cohort_ranges.png — the PhysiCell parameter ranges the sweep feeds (the deliverable)
   tissue_maps.png         — real Visium compartment maps: nodular vs diffuse tumor
   lever_heatmap.png       — 40 tumors x 8 levers, clustered, annotated by favorable/anaplastic
-Output: results/figures/couplings/. Usage: python phase1_mechanotypes/28_more_figures.py
+Output: results/figures/ (flat, phase_c_ prefixed). Usage: python phase1_mechanotypes/28_more_figures.py
 """
 from __future__ import annotations
 
@@ -25,7 +25,8 @@ sys.path.insert(0, str(ROOT / "phase3_abm"))
 from abm_utils import load_config, load_spot_coords_um, resolve_path  # noqa: E402
 
 CD = ROOT / "results" / "couplings"
-OUT = ROOT / "results" / "figures" / "couplings"
+OUT = ROOT / "results" / "figures"
+PFX = "phase_c_"                                     # flat, phase-prefixed (matches phase_a_/phase_b_)
 NEG, POS, GREY = "#c0392b", "#2471a3", "#95a5a6"
 COMP = {"blastemal": "#8e44ad", "epithelial": "#16a085", "stromal": "#e67e22", "necrotic": "#7f8c8d"}
 SHORT = {"proliferation": "prolif", "tp53_target": "p53", "wnt_canonical": "wnt",
@@ -83,7 +84,7 @@ def fig_survival():
     fig.suptitle("TARGET-WT overall survival (125 RNA / 38 MAF cases): honest trends, no FDR hits",
                  fontsize=12.5, weight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(OUT / "survival.png", dpi=150, bbox_inches="tight"); plt.close(fig)
+    fig.savefig(OUT / f"{PFX}survival.png", dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
 def fig_virtual_ranges():
@@ -108,7 +109,7 @@ def fig_virtual_ranges():
     fig.suptitle("Virtual-cohort PhysiCell parameter ranges (the seeding deliverable)",
                  fontsize=13, weight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    fig.savefig(OUT / "virtual_cohort_ranges.png", dpi=150, bbox_inches="tight"); plt.close(fig)
+    fig.savefig(OUT / f"{PFX}virtual_cohort_ranges.png", dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
 def fig_tissue_maps():
@@ -135,7 +136,7 @@ def fig_tissue_maps():
         ax.legend(fontsize=8, frameon=False, markerscale=2, loc="upper right")
     fig.suptitle("Real Visium compartment maps → ABM initial seeding geometry", fontsize=13, weight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(OUT / "tissue_maps.png", dpi=150, bbox_inches="tight"); plt.close(fig)
+    fig.savefig(OUT / f"{PFX}tissue_maps.png", dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
 def fig_lever_heatmap():
@@ -166,7 +167,7 @@ def fig_lever_heatmap():
                         Line2D([0], [0], marker="s", color="w", markerfacecolor=NEG, markersize=9, label="anaplastic")],
                loc="lower center", ncol=2, frameon=False, fontsize=9)
     fig.tight_layout(rect=[0, 0.03, 1, 1])
-    fig.savefig(OUT / "lever_heatmap.png", dpi=150, bbox_inches="tight"); plt.close(fig)
+    fig.savefig(OUT / f"{PFX}lever_heatmap.png", dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
 def main():

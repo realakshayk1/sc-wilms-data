@@ -10,7 +10,7 @@ Reads the CSVs produced by coupling_core.R / 19_bifurcation_transfer.R / 20_bulk
   (5) sc-vs-bulk coupling recovery (what cell resolution buys)
   (6) tissue architecture across tumors (nodular vs diffuse)
 
-Output: results/figures/couplings/{dashboard.png, and each panel}.png
+Output: results/figures/phase_c_{dashboard, network, heatmap, forest, ...}.png (flat, phase-prefixed)
 Usage: python phase1_mechanotypes/21_coupling_figures.py
 """
 from __future__ import annotations
@@ -28,7 +28,8 @@ from matplotlib.lines import Line2D  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CD = ROOT / "results" / "couplings"
-OUT = ROOT / "results" / "figures" / "couplings"
+OUT = ROOT / "results" / "figures"
+PFX = "phase_c_"                                     # flat, phase-prefixed (matches phase_a_/phase_b_)
 NEG, POS, GREY = "#c0392b", "#2471a3", "#95a5a6"     # colorblind-safe red / blue / grey
 SHORT = {"proliferation": "prolif", "tp53_target": "p53", "wnt_canonical": "wnt",
          "blastemal_nephrogenic": "blastemal", "igf": "igf", "emt_axis": "EMT",
@@ -221,7 +222,7 @@ def sensitive_expressive_figure():
     fig.suptitle("Sensitive vs expressive: intrinsic state → extrinsic microenvironment",
                  fontsize=12, weight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(OUT / "sensitive_expressive.png", dpi=150, bbox_inches="tight")
+    fig.savefig(OUT / f"{PFX}sensitive_expressive.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -243,13 +244,13 @@ def main():
     fig.suptitle("Wilms coupled-lever & resolution-bounding results (SCPCP000006, n=40)",
                  fontsize=13, weight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(OUT / "dashboard.png", dpi=150, bbox_inches="tight")
+    fig.savefig(OUT / f"{PFX}dashboard.png", dpi=150, bbox_inches="tight")
     # also save each panel standalone
     for name, fn in panels:
         f, a = plt.subplots(figsize=(6, 5))
         try:
             fn(a)
-            f.tight_layout(); f.savefig(OUT / f"{name}.png", dpi=150, bbox_inches="tight")
+            f.tight_layout(); f.savefig(OUT / f"{PFX}{name}.png", dpi=150, bbox_inches="tight")
         except Exception:  # pragma: no cover
             pass
         plt.close(f)
@@ -258,7 +259,7 @@ def main():
         print("[ok] sensitive_expressive.png")
     except Exception as e:  # pragma: no cover
         print(f"[warn] sensitive_expressive figure skipped: {e}")
-    print(f"[ok] figures -> {OUT}/dashboard.png (+ panels + sensitive_expressive)")
+    print(f"[ok] figures -> {OUT}/{PFX}dashboard.png (+ panels + {PFX}sensitive_expressive)")
 
 
 if __name__ == "__main__":
